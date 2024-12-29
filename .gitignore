@@ -5,3 +5,4 @@ constz
 gcode
 *.gcode
 *.blend1
+perf*
