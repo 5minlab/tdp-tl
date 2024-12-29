@@ -8,14 +8,6 @@ pub struct RangeSetVoxel {
 }
 
 impl Voxel for RangeSetVoxel {
-    fn blocks(&self) -> usize {
-        let mut count = 0usize;
-        for r in self.ranges.iter() {
-            count += (r.end[2] - r.start[2]) as usize;
-        }
-        count
-    }
-
     fn ranges(&self) -> usize {
         self.ranges.iter().count()
     }

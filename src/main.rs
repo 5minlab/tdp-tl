@@ -13,6 +13,9 @@ use rangesetvoxel::RangeSetVoxel;
 mod monotonicvoxel;
 use monotonicvoxel::MonotonicVoxel;
 
+mod svovoxel;
+use svovoxel::SVOVoxel;
+
 #[derive(FromArgs)]
 /// toplevel
 struct TopLevel {
@@ -37,6 +40,10 @@ struct DemoSphereFrames {
     /// const-z mode
     #[argh(option)]
     constz: bool,
+
+    /// dryrun; do not render
+    #[argh(option)]
+    dryrun: bool,
 
     /// output directory
     #[argh(option)]
@@ -137,8 +144,7 @@ impl BoundingBox {
 // 20mm
 const UNIT: f32 = 0.04f32;
 
-pub trait Voxel {
-    fn blocks(&self) -> usize;
+pub trait Voxel: Default {
     fn ranges(&self) -> usize;
     fn bounding_box(&self) -> &BoundingBox;
     fn occupied(&self, coord: VoxelIdx) -> bool;
@@ -302,8 +308,8 @@ fn generate_face_only() -> Model {
     mv.to_model()
 }
 
-fn generate_frames_constz(outdir: &String) -> Result<()> {
-    let mut mv = MonotonicVoxel::default();
+fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
+    let mut mv = V::default();
 
     let mut idx = 0;
     for z in -SIZE..=SIZE {
@@ -431,11 +437,14 @@ fn generate_inject(out: &str) -> Result<()> {
     model.serialize(out, [0f32; 3], 1f32)
 }
 
-fn generate_frames(outdir: &str) -> Result<()> {
-    let mut mv = MonotonicVoxel::default();
+fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
+    let mut mv = V::default();
 
     let mut count: usize = 0;
 
+    let mut dt_render = 0;
+
+    let sw = Stopwatch::start_new();
     let mut idx = 0;
     for z in -SIZE..=SIZE {
         for y in -SIZE..=SIZE {
@@ -444,17 +453,31 @@ fn generate_frames(outdir: &str) -> Result<()> {
                     mv.add([x, y, z].into());
 
                     count += 1;
-                    if count % 20000 == 0 {
+                    if render && count % 20000 == 0 {
                         info!("render={:?}", (x, y, z));
+                        let sw = Stopwatch::start_new();
+
                         let model = mv.to_model();
                         let filename = format!("{}/out_{:03}.obj", outdir, idx);
                         model.serialize(&filename, [0f32; 3], 1f32)?;
                         idx += 1;
+
+                        dt_render += sw.elapsed_ms();
                     }
                 }
             }
         }
     }
+
+    let elapsed = sw.elapsed_ms();
+    info!(
+        "voxel construction: total={}ms, render={}ms, blocks={}, bps={}",
+        elapsed,
+        dt_render,
+        count,
+        count * 1000 / elapsed as usize
+    );
+
     Ok(())
 }
 
@@ -638,7 +661,7 @@ fn generate_gcode<V: Voxel + Default>(
         }
     }
 
-    let blocks = mv.blocks();
+    let blocks = mv.bounding_box().count;
     info!(
         "voxel construction: took={}ms, blocks={}/{}, bps={}",
         sw.elapsed_ms(),
@@ -674,9 +697,14 @@ fn main() -> Result<()> {
     match opt.nested {
         SubCommandEnum::DemoSphereFrames(opt) => {
             if opt.constz {
-                generate_frames_constz(&opt.outdir)
+                generate_frames_constz::<MonotonicVoxel>(&opt.outdir)
             } else {
-                generate_frames(&opt.outdir)
+                if false {
+                    generate_frames::<SVOVoxel>(&opt.outdir, !opt.dryrun).ok();
+                    generate_frames::<RangeSetVoxel>(&opt.outdir, !opt.dryrun).ok();
+                }
+                generate_frames::<MonotonicVoxel>(&opt.outdir, !opt.dryrun).ok();
+                Ok(())
             }
         }
 

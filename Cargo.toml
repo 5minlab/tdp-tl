@@ -17,3 +17,4 @@ ordslice = "0.3"
 rangemap = "1.2"
 rayon = "1.7"
 stopwatch = "0.0.7"
+svo-rs = { git = "https://github.com/Adam-Gleave/svo-rs" }

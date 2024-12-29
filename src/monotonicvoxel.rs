@@ -11,17 +11,6 @@ pub struct MonotonicVoxel {
 }
 
 impl Voxel for MonotonicVoxel {
-    fn blocks(&self) -> usize {
-        let mut count = 0;
-        for ranges in self.ranges.values() {
-            for range in ranges {
-                assert!(range.start < range.end);
-                count += (range.end - range.start) as usize;
-            }
-        }
-        count
-    }
-
     fn ranges(&self) -> usize {
         let mut count = 0;
         for ranges in self.ranges.values() {
