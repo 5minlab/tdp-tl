@@ -39,11 +39,12 @@ impl Voxel for RangeSetVoxel {
             let x = range.start[0];
             let y = range.start[1];
 
-            let range_z = range.start[2]..range.end[2];
+            let z0 = range.start[2];
+            let z1 = range.end[2];
 
             let up = VoxelIdx::from([1, 1, 0]);
-            model.add_face([x, y, range_z.start].into(), up);
-            model.add_face([x, y, range_z.end].into(), up);
+            // model.add_face([x, y, range_z.start].into(), up);
+            model.add_face([x, y, z1].into(), up);
 
             let faces = [
                 ([1, 0], [1, 1, 1], [0, -1, -1]),
@@ -53,13 +54,29 @@ impl Voxel for RangeSetVoxel {
             ];
 
             for ([dx, dy], offset, dir) in faces {
-                for z in range_z.clone() {
-                    if !self.occupied([x + dx, y + dy, z].into()) {
-                        model.add_face(
-                            [x + offset[0], y + offset[1], z + offset[2]].into(),
-                            dir.into(),
-                        );
+                let mut segments = vec![];
+                let mut z_start = z0;
+                for z in z0..z1 {
+                    if self.occupied([x + dx, y + dy, z].into()) {
+                        if z_start != z {
+                            segments.push(z_start..z);
+                        }
+                        z_start = z + 1;
                     }
+                }
+                if z_start < z1 {
+                    segments.push(z_start..z1);
+                }
+
+                for segment in segments {
+                    let z0 = segment.start;
+                    let z1 = segment.end;
+                    let dz = z1 - z0;
+
+                    model.add_face(
+                        [x + offset[0], y + offset[1], z0 + offset[2] * dz].into(),
+                        [dir[0], dir[1], dir[2] * dz].into(),
+                    );
                 }
             }
         }
