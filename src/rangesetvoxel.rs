@@ -34,6 +34,8 @@ impl Voxel for RangeSetVoxel {
     fn to_model(&self) -> Model {
         let mut model = Model::default();
 
+        let mut ranges_t: RangeSet<VoxelIdx> = RangeSet::new();
+
         for range in self.ranges.iter() {
             assert_eq!(range.start.xy(), range.end.xy());
             let x = range.start[0];
@@ -42,9 +44,11 @@ impl Voxel for RangeSetVoxel {
             let z0 = range.start[2];
             let z1 = range.end[2];
 
-            let up = VoxelIdx::from([1, 1, 0]);
-            // model.add_face([x, y, range_z.start].into(), up);
-            model.add_face([x, y, z1].into(), up);
+            {
+                let t_start = VoxelIdx::new([z1, x, y]);
+                let r_end = VoxelIdx::new([z1, x, y + 1]);
+                ranges_t.insert(t_start..r_end);
+            }
 
             let faces = [
                 ([1, 0], [1, 1, 1], [0, -1, -1]),
@@ -79,6 +83,19 @@ impl Voxel for RangeSetVoxel {
                     );
                 }
             }
+        }
+
+        for range in ranges_t.iter() {
+            assert_eq!(range.start.xy(), range.end.xy());
+
+            let z = range.start[0];
+            let x = range.start[1];
+            let y0 = range.start[2];
+            let y1 = range.end[2];
+            let dy = y1 - y0;
+
+            let up = VoxelIdx::from([1, dy, 0]);
+            model.add_face([x, y0, z].into(), up);
         }
 
         model
