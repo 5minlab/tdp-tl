@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use log::*;
 use std::fs::File;
-use stopwatch::Stopwatch;
+use simple_stopwatch::Stopwatch;
 
 mod voxelidx;
 use voxelidx::VoxelIdx;
@@ -325,7 +325,7 @@ fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
         }
 
         let model = mv.to_model();
-        let filename = format!("{}/out_{:03}.obj", outdir, idx);
+        let filename = format!("{}/out_{:.2}.obj", outdir, idx);
         model.serialize(&filename, [0f32; 3], 1f32)?;
         idx += 1;
     }
@@ -442,7 +442,7 @@ fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
 
     let mut count: usize = 0;
 
-    let mut dt_render = 0;
+    let mut dt_render = 0f32;
 
     let sw = Stopwatch::start_new();
     let mut idx = 0;
@@ -458,20 +458,20 @@ fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
                         let sw = Stopwatch::start_new();
 
                         let model = mv.to_model();
-                        let filename = format!("{}/out_{:03}.obj", outdir, idx);
+                        let filename = format!("{}/out_{:.2}.obj", outdir, idx);
                         model.serialize(&filename, [0f32; 3], 1f32)?;
                         idx += 1;
 
-                        dt_render += sw.elapsed_ms();
+                        dt_render += sw.ms();
                     }
                 }
             }
         }
     }
 
-    let elapsed = sw.elapsed_ms();
+    let elapsed = sw.ms();
     info!(
-        "voxel construction: total={}ms, render={}ms, blocks={}, bps={}",
+        "voxel construction: total={:.2}ms, render={:.2}ms, blocks={}, bps={}",
         elapsed,
         dt_render,
         count,
@@ -538,14 +538,14 @@ fn generate_gcode<V: Voxel + Default>(
                 if out_layers {
                     let sw = Stopwatch::start_new();
                     let model = mv.to_model();
-                    info!("to_model: took={}ms", sw.elapsed_ms());
+                    info!("to_model: took={:.2}ms", sw.ms());
 
                     let sw = Stopwatch::start_new();
                     let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
                     model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
                     info!(
-                        "Model::serialize: took={}ms, filename={}",
-                        sw.elapsed_ms(),
+                        "Model::serialize: took={:.2}ms, filename={}",
+                        sw.ms(),
                         out_filename
                     );
                 }
@@ -663,11 +663,11 @@ fn generate_gcode<V: Voxel + Default>(
 
     let blocks = mv.bounding_box().count;
     info!(
-        "voxel construction: took={}ms, blocks={}/{}, bps={}",
-        sw.elapsed_ms(),
+        "voxel construction: took={:.2}ms, blocks={}/{}, bps={}",
+        sw.ms(),
         blocks,
         mv.ranges(),
-        blocks * 1000 / sw.elapsed_ms() as usize
+        blocks * 1000 / sw.ms() as usize
     );
 
     info!("bounding box: {:?}", mv.bounding_box());
@@ -675,13 +675,13 @@ fn generate_gcode<V: Voxel + Default>(
     if !out_layers {
         let sw = Stopwatch::start_new();
         let model = mv.to_model();
-        info!("to_model: took={}ms", sw.elapsed_ms());
+        info!("to_model: took={:.2}ms", sw.ms());
 
         let sw = Stopwatch::start_new();
         model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
         info!(
-            "Model::Serialize: took={}ms, filename={}",
-            sw.elapsed_ms(),
+            "Model::Serialize: took={:.2}ms, filename={}",
+            sw.ms(),
             out_filename
         );
     }
