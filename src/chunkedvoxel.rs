@@ -1,5 +1,6 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
+use ahash::AHashMap;
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
@@ -119,7 +120,7 @@ impl BGMCell {
 
 #[derive(Default)]
 pub struct ChunkedVoxel {
-    chunks: HashMap<u64, BGMCell>,
+    chunks: AHashMap<u64, BGMCell>,
     models: HashMap<u64, Rc<Model>>,
     bb: BoundingBox,
 }
