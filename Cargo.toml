@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.98"
 argh = "0.1.13"
+binary-greedy-meshing = "0.3.6"
 env_logger = "0.11.8"
 indexmap = "2.9.0"
 log = "0.4.27"
@@ -17,4 +18,4 @@ ordslice = "0.3.0"
 rangemap = "1.5.1"
 rayon = "1.10.0"
 simple-stopwatch = "0"
-svo-rs = { git = "https://github.com/Adam-Gleave/svo-rs" }
+svo-rs = { path = "./svo-rs" }

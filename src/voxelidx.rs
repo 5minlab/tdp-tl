@@ -13,6 +13,9 @@ impl VoxelIdx {
     pub fn unit() -> Self {
         Self::new([1, 1, 1])
     }
+    pub fn unitsize(size: i32) -> Self {
+        Self::new([size, size, size])
+    }
     pub fn new(idx: [i32; 3]) -> Self {
         Self { idx }
     }

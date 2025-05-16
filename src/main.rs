@@ -1,8 +1,8 @@
 use anyhow::Result;
 use argh::FromArgs;
 use log::*;
-use std::fs::File;
 use simple_stopwatch::Stopwatch;
+use std::fs::File;
 
 mod voxelidx;
 use voxelidx::VoxelIdx;
@@ -108,6 +108,10 @@ struct SubCommandGcodeLayers {
     /// use rangeset data structure
     #[argh(switch)]
     rangeset: bool,
+
+    /// use svo data structure
+    #[argh(switch)]
+    svo: bool,
 }
 
 impl std::ops::Index<usize> for VoxelIdx {
@@ -189,15 +193,19 @@ impl Model {
     }
 
     fn add_cube(&mut self, coord: VoxelIdx) {
-        self.add_face(coord, [1, 1, 0].into());
-        self.add_face(coord, [1, 0, 1].into());
-        self.add_face(coord, [0, 1, 1].into());
+        self.add_cube_size(coord, 1);
+    }
 
-        let coord = coord + VoxelIdx::unit();
+    fn add_cube_size(&mut self, coord: VoxelIdx, size:i32) {
+        // self.add_face(coord, [size, size, 0].into());
+        self.add_face(coord, [size, 0, size].into());
+        self.add_face(coord, [0, size, size].into());
 
-        self.add_face(coord, [-1, -1, 0].into());
-        self.add_face(coord, [-1, 0, -1].into());
-        self.add_face(coord, [0, -1, -1].into());
+        let coord = coord + VoxelIdx::unitsize(size);
+
+        self.add_face(coord, [-size, -size, 0].into());
+        self.add_face(coord, [-size, 0, -size].into());
+        self.add_face(coord, [0, -size, -size].into());
     }
 
     fn merge(&mut self, other: Self) {
@@ -519,6 +527,7 @@ fn generate_gcode<V: Voxel + Default>(
         parsed.push(item);
     }
 
+    let mut last_sw = Stopwatch::start_new();
     for item in parsed {
         match item {
             (_, Some(Comment(comment))) => {
@@ -538,7 +547,7 @@ fn generate_gcode<V: Voxel + Default>(
                 if out_layers {
                     let sw = Stopwatch::start_new();
                     let model = mv.to_model();
-                    info!("to_model: took={:.2}ms", sw.ms());
+                    info!("to_model: took={:.2}ms/{:.2}ms", last_sw.ms(), sw.ms());
 
                     let sw = Stopwatch::start_new();
                     let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
@@ -548,6 +557,8 @@ fn generate_gcode<V: Voxel + Default>(
                         sw.ms(),
                         out_filename
                     );
+
+                    last_sw = Stopwatch::start_new();
                 }
             }
             (_, Some(GCode(code))) => {
@@ -732,6 +743,8 @@ fn main() -> Result<()> {
             let layer = std::usize::MAX;
             if opt.rangeset {
                 generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true)
+            } else if opt.svo {
+                generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true)
             }
