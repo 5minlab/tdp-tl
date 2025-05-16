@@ -1,6 +1,7 @@
 use anyhow::Result;
 use argh::FromArgs;
 use log::*;
+use nalgebra::Point3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
 
@@ -119,6 +120,10 @@ struct SubCommandGcodeLayers {
     /// use svo data structure
     #[argh(switch)]
     chunked: bool,
+
+    /// glb
+    #[argh(switch)]
+    glb: bool,
 }
 
 impl std::ops::Index<usize> for VoxelIdx {
@@ -223,6 +228,55 @@ impl Model {
             let i3 = self.add_vert(other.vertices[i3]);
             self.faces.push([i0, i1, i2, i3]);
         }
+    }
+
+    fn serialize_gltf(&self, path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
+        use mesh_tools::{GltfBuilder, Triangle};
+        let mut builder = GltfBuilder::new();
+
+        let material = builder.create_basic_material(
+            Some("grey".to_owned()),
+            [0.5, 0.5, 0.5, 1.0],
+        );
+
+        let positions = self
+            .vertices
+            .iter()
+            .map(|idx| Point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
+            .collect::<Vec<_>>();
+        let indices = self
+            .faces
+            .iter()
+            .flat_map(|[i0, i1, i2, i3]| {
+                let i0 = *i0 as u32;
+                let i1 = *i1 as u32;
+                let i2 = *i2 as u32;
+                let i3 = *i3 as u32;
+                [Triangle::new(i0, i2, i1), Triangle::new(i0, i3, i2)]
+            })
+            .collect::<Vec<_>>();
+
+        let mesh = builder.create_custom_mesh(
+            Some("mesh".to_owned()),
+            &positions,
+            &indices,
+            None,
+            None,
+            Some(material),
+        );
+
+        let node = builder.add_node(
+            Some("mesh".to_owned()),
+            Some(mesh),
+            Some([offset[0], offset[2], -offset[1]]),
+            None,
+            Some([scale, scale, scale]),
+        );
+
+        builder.add_scene(Some("scene".to_owned()), Some(vec![node]));
+        builder.export_glb(path)?;
+
+        Ok(())
     }
 
     fn serialize(&self, path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
@@ -521,6 +575,7 @@ fn generate_gcode<V: Voxel + Default>(
     out_filename: &str,
     layer: usize,
     out_layers: bool,
+    out_glb: bool,
 ) -> Result<()> {
     use nalgebra::Vector3;
     use nom_gcode::{GCodeLine::*, Mnemonic};
@@ -577,8 +632,16 @@ fn generate_gcode<V: Voxel + Default>(
                     info!("to_model: took={:.2}ms/{:.2}ms", last_sw.ms(), sw.ms());
 
                     let sw = Stopwatch::start_new();
-                    let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
-                    model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+
+                    let out_filename = if out_glb {
+                        let out_filename = format!("{}/gcode_{:03}.glb", out_filename, layer_idx);
+                        model.serialize_gltf(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+                        out_filename
+                    } else {
+                        let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
+                        model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+                        out_filename
+                    };
                     // model.serialize_raw(&out_filename)?;
                     info!(
                         "Model::serialize: took={:.2}ms, filename={}",
@@ -764,19 +827,19 @@ fn main() -> Result<()> {
 
         SubCommandEnum::Gcode(opt) => {
             let layer = opt.layer.unwrap_or(std::usize::MAX);
-            generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.out, layer, false)
+            generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.out, layer, false, false)
         }
 
         SubCommandEnum::GcodeLayers(opt) => {
             let layer = std::usize::MAX;
             if opt.rangeset {
-                generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true)
+                generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.svo {
-                generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true)
+                generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.chunked {
-                generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true)
+                generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else {
-                generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true)
+                generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }
         }
     }
