@@ -8,14 +8,14 @@
 cargo build --release
 
 # generate obj models, from gcode layer by layer
-tdp-tl gcode-layers --gcode demo/KK_xyzCalibration_cube.gcode --outdir gcode/
+tdp-tl gcode-layers --gcode demo/KK_xyzCalibration_cube.gcode --outdir gcode/ --glb
 
 # render obj model to still image, with blender
-find gcode/ -maxdepth 1 -type f -name '*.obj' \
+find gcode/ -maxdepth 1 -type f -name '*.glb' \
     | xargs -n1 -P4 -I{} blender -b tdp.blend --background --python render.py -- {} "{}.png"
 
 # convert still images to timelapse video
-ffmpeg -framerate 24 -pattern_type glob -i 'gcode/render/*.png' -c:v libx264 -pix_fmt yuv420p timelapse.mp4
+ffmpeg -framerate 24 -pattern_type glob -i 'gcode/*.png' -c:v libx264 -pix_fmt yuv420p timelapse.mp4
 ```
 
 ## Demo
