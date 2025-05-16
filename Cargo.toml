@@ -19,3 +19,6 @@ rangemap = "1.5.1"
 rayon = "1.10.0"
 simple-stopwatch = "0"
 svo-rs = { path = "./svo-rs" }
+
+[profile.release]
+debug = true

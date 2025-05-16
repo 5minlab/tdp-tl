@@ -16,6 +16,9 @@ use monotonicvoxel::MonotonicVoxel;
 mod svovoxel;
 use svovoxel::SVOVoxel;
 
+mod chunkedvoxel;
+use chunkedvoxel::ChunkedVoxel;
+
 #[derive(FromArgs)]
 /// toplevel
 struct TopLevel {
@@ -112,6 +115,10 @@ struct SubCommandGcodeLayers {
     /// use svo data structure
     #[argh(switch)]
     svo: bool,
+
+    /// use svo data structure
+    #[argh(switch)]
+    chunked: bool,
 }
 
 impl std::ops::Index<usize> for VoxelIdx {
@@ -196,7 +203,7 @@ impl Model {
         self.add_cube_size(coord, 1);
     }
 
-    fn add_cube_size(&mut self, coord: VoxelIdx, size:i32) {
+    fn add_cube_size(&mut self, coord: VoxelIdx, size: i32) {
         // self.add_face(coord, [size, size, 0].into());
         self.add_face(coord, [size, 0, size].into());
         self.add_face(coord, [0, size, size].into());
@@ -235,6 +242,26 @@ impl Model {
                 y as f32 * scale + offset[1],
                 z as f32 * scale + offset[2]
             )?;
+        }
+        for [i0, i1, i2, i3] in &self.faces {
+            write!(&mut w, "f {} {} {} {}\n", i0 + 1, i1 + 1, i2 + 1, i3 + 1)?;
+        }
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn serialize_raw(&self, path: &str) -> Result<()> {
+        use std::io::Write;
+
+        let w = File::create(path)?;
+        let mut w = std::io::BufWriter::new(w);
+
+        for idx in &self.vertices {
+            let x = idx[0];
+            let y = idx[1];
+            let z = idx[2];
+            write!(&mut w, "v {} {} {}\n", x, y, z)?;
         }
         for [i0, i1, i2, i3] in &self.faces {
             write!(&mut w, "f {} {} {} {}\n", i0 + 1, i1 + 1, i2 + 1, i3 + 1)?;
@@ -364,7 +391,7 @@ fn inject_at<V: Voxel>(v: &mut V, zlow: i32, zhigh: i32, pos0: VoxelIdx, n: usiz
     // with unit = 0.04mm and nozzle diameter 0.4mm, limiting maximum depth to 15
 
     let mut candidates = BinaryHeap::new();
-    let mut visited = MonotonicVoxel::default();
+    let mut visited = ChunkedVoxel::default();
     candidates.push(HeapItem {
         dist: 0,
         depth: 10,
@@ -552,6 +579,7 @@ fn generate_gcode<V: Voxel + Default>(
                     let sw = Stopwatch::start_new();
                     let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
                     model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+                    // model.serialize_raw(&out_filename)?;
                     info!(
                         "Model::serialize: took={:.2}ms, filename={}",
                         sw.ms(),
@@ -745,6 +773,8 @@ fn main() -> Result<()> {
                 generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.svo {
                 generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true)
+            } else if opt.chunked {
+                generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true)
             }
