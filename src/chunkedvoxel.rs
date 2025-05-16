@@ -1,8 +1,8 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use binary_greedy_meshing as bgm;
-use std::collections::{BTreeSet, HashMap};
 use std::cell::Cell;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug)]
 struct BGMCell {
@@ -122,41 +122,35 @@ pub struct ChunkedVoxel {
 
 const BITS: u64 = 21;
 const MASK: u64 = (1 << BITS) - 1;
-impl ChunkedVoxel {
-    fn chunk_idx(coord: VoxelIdx) -> u64 {
-        let x = coord.idx[0].div_euclid(32);
-        let y = coord.idx[1].div_euclid(32);
-        let z = coord.idx[2].div_euclid(32);
+fn chunk_idx(coord: VoxelIdx) -> u64 {
+    let x = coord.idx[0].div_euclid(32);
+    let y = coord.idx[1].div_euclid(32);
+    let z = coord.idx[2].div_euclid(32);
 
-        let pack_axis = |v: i32| -> u64 {
-            // Zig-zag encode signed→unsigned so −1 → 1, 0 → 0, 1 → 2, etc.
-            let zz = ((v << 1) ^ (v >> 31)) as u32 as u64;
-            zz & MASK
-        };
+    let pack_axis = |v: i32| -> u64 { unsafe { std::mem::transmute::<_, u32>(v) as u64 } };
 
-        (pack_axis(x) << (BITS * 2)) | (pack_axis(y) << BITS) | pack_axis(z)
-    }
+    (pack_axis(x) << (BITS * 2)) | (pack_axis(y) << BITS) | pack_axis(z)
+}
 
-    fn chunk_base(key: u64) -> VoxelIdx {
-        let xpart = key >> (BITS * 2);
-        let ypart = (key >> BITS) & MASK;
-        let zpart = key & MASK;
+fn chunk_base(key: u64) -> VoxelIdx {
+    let xpart = key >> (BITS * 2);
+    let ypart = (key >> BITS) & MASK;
+    let zpart = key & MASK;
 
-        let unpack_axis = |v: u64| -> i32 {
-            let sign = v & 1;
-            let value = v >> 1;
-            let value = value as i32;
-            if sign == 0 {
-                value
-            } else {
-                -(value as i32)
-            }
-        };
+    let unpack_axis = |v: u64| -> i32 { unsafe { std::mem::transmute(v as u32) } };
 
-        let x = unpack_axis(xpart) << 5;
-        let y = unpack_axis(ypart) << 5;
-        let z = unpack_axis(zpart) << 5;
-        VoxelIdx::from([x, y, z])
+    let x = unpack_axis(xpart) << 5;
+    let y = unpack_axis(ypart) << 5;
+    let z = unpack_axis(zpart) << 5;
+    VoxelIdx::from([x, y, z])
+}
+
+fn rem_euclid(a: i32, b: i32) -> i32 {
+    let r = a % b;
+    if r < 0 {
+        r + b
+    } else {
+        r
     }
 }
 
@@ -170,11 +164,11 @@ impl Voxel for ChunkedVoxel {
     }
 
     fn occupied(&self, coord: VoxelIdx) -> bool {
-        let idx = Self::chunk_idx(coord);
+        let idx = chunk_idx(coord);
         if let Some(cell) = self.chunks.get(&idx) {
-            let x = coord.idx[0].rem_euclid(32) as usize;
-            let y = coord.idx[1].rem_euclid(32) as usize;
-            let z = coord.idx[2].rem_euclid(32) as usize;
+            let x = rem_euclid(coord.idx[0], 32) as usize;
+            let y = rem_euclid(coord.idx[1], 32) as usize;
+            let z = rem_euclid(coord.idx[2], 32) as usize;
             cell.get(x, y, z)
         } else {
             false
@@ -182,10 +176,10 @@ impl Voxel for ChunkedVoxel {
     }
 
     fn add(&mut self, coord: VoxelIdx) -> bool {
-        let idx = Self::chunk_idx(coord);
-        let x = coord.idx[0].rem_euclid(32) as usize;
-        let y = coord.idx[1].rem_euclid(32) as usize;
-        let z = coord.idx[2].rem_euclid(32) as usize;
+        let idx = chunk_idx(coord);
+        let x = rem_euclid(coord.idx[0], 32) as usize;
+        let y = rem_euclid(coord.idx[1], 32) as usize;
+        let z = rem_euclid(coord.idx[2], 32) as usize;
 
         if let Some(cell) = self.chunks.get_mut(&idx) {
             self.bb.add(coord);
@@ -220,7 +214,7 @@ impl Voxel for ChunkedVoxel {
             */
             dirty += 1;
 
-            let base = Self::chunk_base(idx);
+            let base = chunk_base(idx);
             count += cell.to_model(base, &mut voxels, &mut model);
             cell.dirty.set(false);
         }
