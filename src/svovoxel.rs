@@ -1,7 +1,9 @@
 use log::*;
+use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
+use binary_greedy_meshing as bgm;
 use svo_rs::*;
 
 const SIZE: u32 = 65536;
@@ -46,7 +48,120 @@ impl std::default::Default for SVOVoxel {
     }
 }
 
-fn visit_quad2(node: &Node<bool>, depth: u32, max_depth: u32, model: &mut Model) -> usize {
+fn fill_quad3(base: &Node<bool>, node: &Node<bool>, voxels: &mut [u16; bgm::CS_P3]) -> usize {
+    let mut count = 0;
+
+    match node.ty {
+        NodeType::Leaf(value) => {
+            let b = node.bounds;
+            for x in b[0].x..b[1].x {
+                let x1 = (x - base.bounds[0].x) as usize;
+                for y in b[0].y..b[1].y {
+                    let y1 = (y - base.bounds[0].y) as usize;
+                    for z in b[0].z..b[1].z {
+                        let z1 = (z - base.bounds[0].z) as usize;
+
+                        let idx = bgm::pad_linearize(x1, y1, z1);
+                        if value {
+                            voxels[idx] = 1;
+                        }
+                        count += 1;
+                    }
+                }
+            }
+        }
+        NodeType::Internal => {
+            for child in node.children.iter() {
+                if let Some(ref child) = **child {
+                    count += fill_quad3(base, child, voxels);
+                }
+            }
+        }
+    }
+
+    count
+}
+
+fn visit_quad_bgm(node: &Node<bool>, model: &mut Model) -> usize {
+    if let NodeType::Leaf(_) = node.ty {
+        return 0;
+    }
+
+    let b = node.bounds;
+    let size = b[1].x - b[0].x;
+    if size > 32 {
+        let mut count = 0;
+        for child in node.children.iter() {
+            if let Some(ref child) = **child {
+                count += visit_quad_bgm(child, model);
+            }
+        }
+        return count;
+    }
+
+    let mut voxels = [0; bgm::CS_P3];
+
+    fill_quad3(node, node, &mut voxels);
+    let mut mesh_data = bgm::MeshData::new();
+    bgm::mesh(&voxels, &mut mesh_data, BTreeSet::default());
+
+    let decode_quad = |quad: u64| -> (VoxelIdx, [i32; 2]) {
+        let x = (quad & 0b111111) as u32;
+        let y = ((quad >> 6) & 0b111111) as u32;
+        let z = ((quad >> 12) & 0b111111) as u32;
+        let w = ((quad >> 18) & 0b111111) as u32;
+        let h = ((quad >> 24) & 0b111111) as u32;
+
+        let ox = b[0].x + x as u32;
+        let oy = b[0].y + y as u32;
+        let oz = b[0].z + z as u32;
+
+        let idx = from_voxel_idx([ox, oy, oz]);
+        (idx, [w as i32, h as i32])
+    };
+
+    // Up, Down, Right, Left, Front, Back, in this order. (assuming right handed Y up)
+
+    for quad in mesh_data.quads[0].iter() {
+        // Up
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([w, 0, h]));
+    }
+    for quad in mesh_data.quads[1].iter() {
+        // Down
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([-w, 0, h]));
+    }
+    for quad in mesh_data.quads[2].iter() {
+        // Right
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([0, -w, h]));
+    }
+    for quad in mesh_data.quads[3].iter() {
+        // Left
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([0, w, h]));
+    }
+    for quad in mesh_data.quads[4].iter() {
+        // Front
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([-w, h, 0]));
+    }
+    for quad in mesh_data.quads[5].iter() {
+        // Back
+        let (idx, [w, h]) = decode_quad(*quad);
+        model.add_face(idx, VoxelIdx::from([w, h, 0]));
+    }
+
+    let mut count = 0;
+    for quads in mesh_data.quads.iter() {
+        count += quads.len();
+    }
+
+    count
+}
+
+fn visit_quad_naive(node: &Node<bool>, depth: u32, max_depth: u32, model: &mut Model) -> usize {
     let mut count = 0;
     match node.ty {
         NodeType::Leaf(_) => {
@@ -59,7 +174,7 @@ fn visit_quad2(node: &Node<bool>, depth: u32, max_depth: u32, model: &mut Model)
         NodeType::Internal => {
             for child in node.children.iter() {
                 if let Some(ref child) = **child {
-                    count += visit_quad2(child, depth + 1, max_depth, model);
+                    count += visit_quad_naive(child, depth + 1, max_depth, model);
                 }
             }
         }
@@ -67,6 +182,7 @@ fn visit_quad2(node: &Node<bool>, depth: u32, max_depth: u32, model: &mut Model)
     count
 }
 
+#[allow(unused)]
 fn visit_quad(node: &Node<bool>, depth: u32, max_depth: u32, model: &mut Model) -> usize {
     let mut count = 0;
     match node.ty {
@@ -142,19 +258,21 @@ impl Voxel for SVOVoxel {
 
     fn to_model(&self) -> Model {
         let mut model = Model::default();
-        visit_quad(
-            &self.inner.root(),
-            0,
-            self.inner.max_lod_level(),
-            &mut model,
-        );
 
-        let quad_count = visit_quad2(
-            &self.inner.root(),
-            0,
-            self.inner.max_lod_level(),
-            &mut model,
-        );
+        let quad_count = if false {
+            visit_quad_naive(
+                &self.inner.root(),
+                0,
+                self.inner.max_lod_level(),
+                &mut model,
+            )
+        } else {
+            visit_quad_bgm(
+                &self.inner.root(),
+                &mut model,
+            )
+        };
+
         info!("quad_count: {}", quad_count);
         model
     }
