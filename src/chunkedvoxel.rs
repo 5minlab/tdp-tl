@@ -1,8 +1,10 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
-use binary_greedy_meshing as bgm;
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
+
+use binary_greedy_meshing as bgm;
 
 #[derive(Debug)]
 struct BGMCell {
@@ -19,6 +21,7 @@ impl std::default::Default for BGMCell {
         }
     }
 }
+
 impl BGMCell {
     fn index(x: usize, y: usize) -> usize {
         (x << 5) | y
@@ -117,6 +120,7 @@ impl BGMCell {
 #[derive(Default)]
 pub struct ChunkedVoxel {
     chunks: HashMap<u64, BGMCell>,
+    models: HashMap<u64, Rc<Model>>,
     bb: BoundingBox,
 }
 
@@ -200,23 +204,29 @@ impl Voxel for ChunkedVoxel {
         }
     }
 
-    fn to_model(&self) -> Model {
-        let mut model = Model::default();
+    fn to_model(&mut self) -> Vec<Rc<Model>> {
+        let mut models = vec![];
         let mut voxels = [0; bgm::CS_P3];
 
         let mut dirty = 0;
         let mut count = 0;
         for (&idx, cell) in self.chunks.iter() {
-            /*
             if !cell.dirty.get() {
+                if let Some(model) = self.models.get(&idx) {
+                    models.push(model.clone());
+                }
                 continue;
             }
-            */
             dirty += 1;
 
             let base = chunk_base(idx);
+
+            let mut model = Model::default();
             count += cell.to_model(base, &mut voxels, &mut model);
             cell.dirty.set(false);
+            let model = Rc::new(model);
+            self.models.insert(idx, model.clone());
+            models.push(model);
         }
 
         eprintln!(
@@ -225,6 +235,7 @@ impl Voxel for ChunkedVoxel {
             self.chunks.len(),
             count
         );
-        model
+
+        models
     }
 }

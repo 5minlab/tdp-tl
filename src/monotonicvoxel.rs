@@ -2,6 +2,7 @@ use super::{BoundingBox, Model, Voxel, VoxelIdx};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::rc::Rc;
 
 // RLE, over Z axis,
 #[derive(Default)]
@@ -72,8 +73,9 @@ impl Voxel for MonotonicVoxel {
         true
     }
 
-    fn to_model(&self) -> Model {
-        self.ranges
+    fn to_model(&mut self) -> Vec<Rc<Model>> {
+        let models = self
+            .ranges
             .par_iter()
             .map(|(coord, ranges)| {
                 let mut model = Model::default();
@@ -115,12 +117,8 @@ impl Voxel for MonotonicVoxel {
                 }
                 model
             })
-            .reduce(
-                || Model::default(),
-                |mut a, b| {
-                    a.merge(b);
-                    a
-                },
-            )
+            .collect::<Vec<_>>();
+
+        models.into_iter().map(|model| Rc::new(model)).collect()
     }
 }

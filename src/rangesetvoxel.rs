@@ -1,5 +1,6 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 use rangemap::RangeSet;
+use std::rc::Rc;
 
 #[derive(Default)]
 pub struct RangeSetVoxel {
@@ -31,7 +32,7 @@ impl Voxel for RangeSetVoxel {
         true
     }
 
-    fn to_model(&self) -> Model {
+    fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut model = Model::default();
 
         let mut ranges_t: RangeSet<VoxelIdx> = RangeSet::new();
@@ -98,6 +99,6 @@ impl Voxel for RangeSetVoxel {
             model.add_face([x, y0, z].into(), up);
         }
 
-        model
+        vec![Rc::new(model)]
     }
 }

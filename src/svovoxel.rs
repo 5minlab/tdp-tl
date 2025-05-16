@@ -1,6 +1,7 @@
 use log::*;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
+use std::rc::Rc;
 
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 use binary_greedy_meshing as bgm;
@@ -256,7 +257,7 @@ impl Voxel for SVOVoxel {
         }
     }
 
-    fn to_model(&self) -> Model {
+    fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut model = Model::default();
 
         let quad_count = if false {
@@ -267,13 +268,10 @@ impl Voxel for SVOVoxel {
                 &mut model,
             )
         } else {
-            visit_quad_bgm(
-                &self.inner.root(),
-                &mut model,
-            )
+            visit_quad_bgm(&self.inner.root(), &mut model)
         };
 
         info!("quad_count: {}", quad_count);
-        model
+        vec![Rc::new(model)]
     }
 }

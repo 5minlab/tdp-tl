@@ -4,6 +4,7 @@ use log::*;
 use nalgebra::Point3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
+use std::rc::Rc;
 
 mod voxelidx;
 use voxelidx::VoxelIdx;
@@ -165,7 +166,7 @@ pub trait Voxel: Default {
     fn bounding_box(&self) -> &BoundingBox;
     fn occupied(&self, coord: VoxelIdx) -> bool;
     fn add(&mut self, coord: VoxelIdx) -> bool;
-    fn to_model(&self) -> Model;
+    fn to_model(&mut self) -> Vec<Rc<Model>>;
 }
 
 #[derive(Default)]
@@ -220,6 +221,7 @@ impl Model {
         self.add_face(coord, [0, -size, -size].into());
     }
 
+    #[allow(unused)]
     fn merge(&mut self, other: Self) {
         for [i0, i1, i2, i3] in other.faces {
             let i0 = self.add_vert(other.vertices[i0]);
@@ -230,21 +232,46 @@ impl Model {
         }
     }
 
-    fn serialize_gltf(&self, path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
-        use mesh_tools::{GltfBuilder, Triangle};
-        let mut builder = GltfBuilder::new();
+    #[allow(unused)]
+    fn serialize_raw(&self, path: &str) -> Result<()> {
+        use std::io::Write;
 
-        let material = builder.create_basic_material(
-            Some("grey".to_owned()),
-            [0.5, 0.5, 0.5, 1.0],
-        );
+        let w = File::create(path)?;
+        let mut w = std::io::BufWriter::new(w);
 
-        let positions = self
+        for idx in &self.vertices {
+            let x = idx[0];
+            let y = idx[1];
+            let z = idx[2];
+            write!(&mut w, "v {} {} {}\n", x, y, z)?;
+        }
+        for [i0, i1, i2, i3] in &self.faces {
+            write!(&mut w, "f {} {} {} {}\n", i0 + 1, i1 + 1, i2 + 1, i3 + 1)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn model_serialize_gltf(
+    models: &[Rc<Model>],
+    path: &str,
+    offset: [f32; 3],
+    scale: f32,
+) -> Result<()> {
+    use mesh_tools::{GltfBuilder, Triangle};
+    let mut builder = GltfBuilder::new();
+
+    let material = builder.create_basic_material(Some("grey".to_owned()), [0.5, 0.5, 0.5, 1.0]);
+    let mut nodes = vec![];
+
+    for model in models {
+        let positions = model
             .vertices
             .iter()
             .map(|idx| Point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
             .collect::<Vec<_>>();
-        let indices = self
+        let indices = model
             .faces
             .iter()
             .flat_map(|[i0, i1, i2, i3]| {
@@ -272,20 +299,24 @@ impl Model {
             None,
             Some([scale, scale, scale]),
         );
-
-        builder.add_scene(Some("scene".to_owned()), Some(vec![node]));
-        builder.export_glb(path)?;
-
-        Ok(())
+        nodes.push(node);
     }
 
-    fn serialize(&self, path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
-        use std::io::Write;
+    builder.add_scene(Some("scene".to_owned()), Some(nodes));
+    builder.export_glb(path)?;
 
-        let w = File::create(path)?;
-        let mut w = std::io::BufWriter::new(w);
+    Ok(())
+}
 
-        for idx in &self.vertices {
+fn model_serialize(models: &[Rc<Model>], path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
+    use std::io::Write;
+
+    let w = File::create(path)?;
+    let mut w = std::io::BufWriter::new(w);
+
+    let mut o = 1;
+    for model in models {
+        for idx in &model.vertices {
             let x = idx[0];
             let y = idx[1];
             let z = idx[2];
@@ -297,32 +328,13 @@ impl Model {
                 z as f32 * scale + offset[2]
             )?;
         }
-        for [i0, i1, i2, i3] in &self.faces {
-            write!(&mut w, "f {} {} {} {}\n", i0 + 1, i1 + 1, i2 + 1, i3 + 1)?;
+        for [i0, i1, i2, i3] in &model.faces {
+            write!(&mut w, "f {} {} {} {}\n", i0 + o, i1 + o, i2 + o, i3 + o)?;
         }
-
-        Ok(())
+        o += model.vertices.len();
     }
 
-    #[allow(unused)]
-    fn serialize_raw(&self, path: &str) -> Result<()> {
-        use std::io::Write;
-
-        let w = File::create(path)?;
-        let mut w = std::io::BufWriter::new(w);
-
-        for idx in &self.vertices {
-            let x = idx[0];
-            let y = idx[1];
-            let z = idx[2];
-            write!(&mut w, "v {} {} {}\n", x, y, z)?;
-        }
-        for [i0, i1, i2, i3] in &self.faces {
-            write!(&mut w, "f {} {} {} {}\n", i0 + 1, i1 + 1, i2 + 1, i3 + 1)?;
-        }
-
-        Ok(())
-    }
+    Ok(())
 }
 
 const SIZE: i32 = 100i32;
@@ -330,7 +342,7 @@ fn test(x: i32, y: i32, z: i32) -> bool {
     return x * x + y * y + z * z < SIZE * SIZE;
 }
 
-fn generate_brute_force() -> Model {
+fn generate_brute_force() -> Vec<Rc<Model>> {
     let mut m = Model::default();
 
     for z in -SIZE..=SIZE {
@@ -343,10 +355,10 @@ fn generate_brute_force() -> Model {
         }
     }
 
-    m
+    vec![Rc::new(m)]
 }
 
-fn generate_shell() -> Model {
+fn generate_shell() -> Vec<Rc<Model>> {
     let mut m = Model::default();
 
     const NEIGHBORS: [[i32; 3]; 6] = [
@@ -379,10 +391,10 @@ fn generate_shell() -> Model {
         }
     }
 
-    m
+    vec![Rc::new(m)]
 }
 
-fn generate_face_only() -> Model {
+fn generate_face_only() -> Vec<Rc<Model>> {
     let mut mv = MonotonicVoxel::default();
 
     for z in -SIZE..=SIZE {
@@ -415,7 +427,7 @@ fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
 
         let model = mv.to_model();
         let filename = format!("{}/out_{:.2}.obj", outdir, idx);
-        model.serialize(&filename, [0f32; 3], 1f32)?;
+        model_serialize(&model, &filename, [0f32; 3], 1f32)?;
         idx += 1;
     }
     Ok(())
@@ -523,7 +535,7 @@ fn generate_inject(out: &str) -> Result<()> {
     }
 
     let model = mv.to_model();
-    model.serialize(out, [0f32; 3], 1f32)
+    model_serialize(&model, out, [0f32; 3], 1f32)
 }
 
 fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
@@ -548,7 +560,7 @@ fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
 
                         let model = mv.to_model();
                         let filename = format!("{}/out_{:.2}.obj", outdir, idx);
-                        model.serialize(&filename, [0f32; 3], 1f32)?;
+                        model_serialize(&model, &filename, [0f32; 3], 1f32)?;
                         idx += 1;
 
                         dt_render += sw.ms();
@@ -635,11 +647,11 @@ fn generate_gcode<V: Voxel + Default>(
 
                     let out_filename = if out_glb {
                         let out_filename = format!("{}/gcode_{:03}.glb", out_filename, layer_idx);
-                        model.serialize_gltf(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+                        model_serialize_gltf(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
                         out_filename
                     } else {
                         let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
-                        model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+                        model_serialize(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
                         out_filename
                     };
                     // model.serialize_raw(&out_filename)?;
@@ -780,7 +792,7 @@ fn generate_gcode<V: Voxel + Default>(
         info!("to_model: took={:.2}ms", sw.ms());
 
         let sw = Stopwatch::start_new();
-        model.serialize(&out_filename, [-90f32, -90f32, 0f32], UNIT)?;
+        model_serialize(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
         info!(
             "Model::Serialize: took={:.2}ms, filename={}",
             sw.ms(),
@@ -819,7 +831,7 @@ fn main() -> Result<()> {
                 generate_face_only()
             };
 
-            model.serialize(&opt.out, [0f32; 3], 1f32)?;
+            model_serialize(&model, &opt.out, [0f32; 3], 1f32)?;
             Ok(())
         }
 
