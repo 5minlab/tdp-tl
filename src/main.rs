@@ -183,6 +183,12 @@ const FILAMENT_DIAMETER: f32 = 1.75f32;
 const FILAMENT_CROSS_SECION: f32 =
     0.25f32 * std::f32::consts::PI * FILAMENT_DIAMETER * FILAMENT_DIAMETER;
 
+// unit: millimeters
+// TODO: extract from gcode
+const LAYER_HEIGHT: f32 = 0.2f32;
+const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
+const Z_OFFSET_UP: i32 = 1;
+
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
     fn bounding_box(&self) -> &BoundingBox;
@@ -515,7 +521,6 @@ fn inject_at<V: Voxel>(
     #[derive(Clone, Copy, Ord, PartialEq, Eq, Debug)]
     struct HeapItem {
         dist: usize,
-        depth: usize,
         src: VoxelIdx,
         pos: VoxelIdx,
     }
@@ -524,8 +529,6 @@ fn inject_at<V: Voxel>(
             Some(other.dist.cmp(&self.dist))
         }
     }
-
-    // with unit = 0.04mm and nozzle diameter 0.4mm, limiting maximum depth to 15
 
     let mut candidates = BinaryHeap::new();
     let mut visited = ChunkedVoxel::default();
@@ -559,12 +562,12 @@ fn inject_at<V: Voxel>(
         }
     }
 
-    const MAX_DEPTH: usize = (0.2 / UNIT * 4.0) as usize;
+    const MAX_DIST_AXIS: usize = (LAYER_HEIGHT / UNIT) as usize;
+    const MAX_DIST_SQ: usize = MAX_DIST_AXIS * MAX_DIST_AXIS * MAX_DIST_AXIS * 4;
 
     for pos in initial_positions {
         candidates.push(HeapItem {
             dist: 0,
-            depth: MAX_DEPTH,
             src: pos,
             pos,
         });
@@ -572,14 +575,10 @@ fn inject_at<V: Voxel>(
 
     while let Some(HeapItem {
         dist: _dist,
-        depth,
         src,
         pos,
     }) = candidates.pop()
     {
-        if depth == 0 {
-            continue;
-        }
         if !visited.add(pos) {
             continue;
         }
@@ -611,9 +610,11 @@ fn inject_at<V: Voxel>(
 
             let delta = src - next;
             let dist = delta.magnitude_squared();
+            if dist > MAX_DIST_SQ {
+                continue;
+            }
             candidates.push(HeapItem {
                 dist,
-                depth: depth - 1,
                 src,
                 pos: next,
             });
@@ -701,12 +702,6 @@ fn generate_gcode<V: Voxel + Default>(
     use nom_gcode::{GCodeLine::*, Mnemonic};
 
     let mut mv = V::default();
-
-    // unit: millimeters
-    // TODO: extract from gcode
-    const LAYER_HEIGHT: f32 = 0.2f32;
-    const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
-    const Z_OFFSET_UP: i32 = (LAYER_HEIGHT / UNIT / 2.0) as i32;
 
     let gcode = std::fs::read_to_string(filename)?;
 
