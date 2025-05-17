@@ -10,24 +10,20 @@ use std::rc::Rc;
 mod cell;
 mod voxelidx;
 use voxelidx::VoxelIdx;
-
 mod rangesetvoxel;
 use rangesetvoxel::RangeSetVoxel;
-
 mod monotonicvoxel;
 use monotonicvoxel::MonotonicVoxel;
-
 mod svovoxel;
 use svovoxel::SVOVoxel;
-
 mod chunkedvoxel;
 use chunkedvoxel::ChunkedVoxel;
-
 mod lodvoxel;
 use lodvoxel::LodVoxel;
-
 mod isovoxel;
 use isovoxel::IsoVoxel;
+mod fsnvoxel;
+use fsnvoxel::FSNVoxel;
 
 #[derive(FromArgs)]
 /// toplevel
@@ -137,6 +133,10 @@ struct SubCommandGcodeLayers {
     /// iso
     #[argh(switch)]
     iso: bool,
+
+    /// fsn
+    #[argh(switch)]
+    fsn: bool,
 
     /// glb
     #[argh(switch)]
@@ -969,6 +969,8 @@ fn main() -> Result<()> {
                 generate_gcode::<LodVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.iso {
                 generate_gcode::<IsoVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+            } else if opt.fsn {
+                generate_gcode::<FSNVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }
