@@ -6,6 +6,7 @@ use simple_stopwatch::Stopwatch;
 use std::fs::File;
 use std::rc::Rc;
 
+mod cell;
 mod voxelidx;
 use voxelidx::VoxelIdx;
 
@@ -20,6 +21,9 @@ use svovoxel::SVOVoxel;
 
 mod chunkedvoxel;
 use chunkedvoxel::ChunkedVoxel;
+
+mod lodvoxel;
+use lodvoxel::LodVoxel;
 
 #[derive(FromArgs)]
 /// toplevel
@@ -122,6 +126,10 @@ struct SubCommandGcodeLayers {
     #[argh(switch)]
     chunked: bool,
 
+    /// use svo data structure
+    #[argh(switch)]
+    lod: bool,
+
     /// glb
     #[argh(switch)]
     glb: bool,
@@ -173,6 +181,10 @@ pub trait Voxel: Default {
 pub struct Model {
     vertices: indexmap::IndexSet<VoxelIdx>,
     faces: Vec<[usize; 4]>,
+
+    raw_vertices: Vec<[f32; 3]>,
+    raw_triangles: Vec<[u32; 3]>,
+    raw_normals: Vec<[f32; 3]>,
 }
 
 impl Model {
@@ -222,17 +234,6 @@ impl Model {
     }
 
     #[allow(unused)]
-    fn merge(&mut self, other: Self) {
-        for [i0, i1, i2, i3] in other.faces {
-            let i0 = self.add_vert(other.vertices[i0]);
-            let i1 = self.add_vert(other.vertices[i1]);
-            let i2 = self.add_vert(other.vertices[i2]);
-            let i3 = self.add_vert(other.vertices[i3]);
-            self.faces.push([i0, i1, i2, i3]);
-        }
-    }
-
-    #[allow(unused)]
     fn serialize_raw(&self, path: &str) -> Result<()> {
         use std::io::Write;
 
@@ -265,44 +266,88 @@ fn model_serialize_gltf(
     let material = builder.create_basic_material(Some("grey".to_owned()), [0.5, 0.5, 0.5, 1.0]);
     let mut nodes = vec![];
 
-    for model in models {
-        let positions = model
-            .vertices
-            .iter()
-            .map(|idx| Point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
-            .collect::<Vec<_>>();
-        let indices = model
-            .faces
-            .iter()
-            .flat_map(|[i0, i1, i2, i3]| {
-                let i0 = *i0 as u32;
-                let i1 = *i1 as u32;
-                let i2 = *i2 as u32;
-                let i3 = *i3 as u32;
-                [Triangle::new(i0, i2, i1), Triangle::new(i0, i3, i2)]
-            })
-            .collect::<Vec<_>>();
+    for (i, model) in models.iter().enumerate() {
+        if !model.vertices.is_empty() {
+            let positions = model
+                .vertices
+                .iter()
+                .map(|idx| Point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
+                .collect::<Vec<_>>();
+            let indices = model
+                .faces
+                .iter()
+                .flat_map(|[i0, i1, i2, i3]| {
+                    let i0 = *i0 as u32;
+                    let i1 = *i1 as u32;
+                    let i2 = *i2 as u32;
+                    let i3 = *i3 as u32;
+                    [Triangle::new(i0, i2, i1), Triangle::new(i0, i3, i2)]
+                })
+                .collect::<Vec<_>>();
 
-        let mesh = builder.create_custom_mesh(
-            Some("mesh".to_owned()),
-            &positions,
-            &indices,
-            None,
-            None,
-            Some(material),
-        );
+            let name = format!("quads_{}", i);
+            let mesh = builder.create_custom_mesh(
+                Some(name.clone()),
+                &positions,
+                &indices,
+                None,
+                None,
+                Some(material),
+            );
+            let node = builder.add_node(Some(name.clone()), Some(mesh), None, None, None);
+            nodes.push(node);
+        }
 
-        let node = builder.add_node(
-            Some("mesh".to_owned()),
-            Some(mesh),
-            Some([offset[0], offset[2], -offset[1]]),
-            None,
-            Some([scale, scale, scale]),
-        );
-        nodes.push(node);
+        if !model.raw_vertices.is_empty() {
+            let positions = model
+                .raw_vertices
+                .iter()
+                .map(|idx| Point3::new(idx[0], idx[2], -idx[1]))
+                .collect::<Vec<_>>();
+
+            let indices = model
+                .raw_triangles
+                .iter()
+                .flat_map(|[i0, i1, i2]| {
+                    let i0 = *i0;
+                    let i1 = *i1;
+                    let i2 = *i2;
+                    [Triangle::new(i0, i1, i2)]
+                })
+                .collect::<Vec<_>>();
+
+            let normals = model
+                .raw_normals
+                .iter()
+                .map(|idx| nalgebra::Vector3::new(idx[0], idx[2], -idx[1]))
+                .collect::<Vec<_>>();
+
+            assert_eq!(positions.len(), normals.len());
+
+            let name = format!("raw_{}", i);
+            let mesh = builder.create_custom_mesh(
+                Some(name.clone()),
+                &positions,
+                &indices,
+                Some(normals),
+                None,
+                Some(material),
+            );
+            let node = builder.add_node(Some(name.clone()), Some(mesh), None, None, None);
+            nodes.push(node);
+        }
     }
 
-    builder.add_scene(Some("scene".to_owned()), Some(nodes));
+    let root = builder.add_node_with_children(
+        Some("root".to_owned()),
+        None,
+        Some([offset[0], offset[2], -offset[1]]),
+        None,
+        Some([scale, scale, scale]),
+        nodes,
+    );
+
+    builder.add_scene(Some("scene".to_owned()), Some(vec![root]));
     builder.export_glb(path)?;
 
     Ok(())
@@ -850,6 +895,8 @@ fn main() -> Result<()> {
                 generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.chunked {
                 generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+            } else if opt.lod {
+                generate_gcode::<LodVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }
