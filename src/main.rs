@@ -4,6 +4,7 @@ use log::*;
 use nalgebra::Point3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
+use std::ops::Range;
 use std::rc::Rc;
 
 mod cell;
@@ -175,6 +176,12 @@ impl BoundingBox {
 // unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
 // 20mm
 const UNIT: f32 = 0.04f32;
+
+// block volume in cubic millimeters
+const BLOCK_VOLUME: f32 = UNIT * UNIT * UNIT;
+const FILAMENT_DIAMETER: f32 = 1.75f32;
+const FILAMENT_CROSS_SECION: f32 =
+    0.25f32 * std::f32::consts::PI * FILAMENT_DIAMETER * FILAMENT_DIAMETER;
 
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
@@ -492,8 +499,7 @@ fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
 
 fn inject_at<V: Voxel>(
     v: &mut V,
-    zlow: i32,
-    zhigh: i32,
+    zrange: Range<i32>,
     pos0: VoxelIdx,
     pos1: VoxelIdx,
     n: usize,
@@ -553,10 +559,12 @@ fn inject_at<V: Voxel>(
         }
     }
 
+    const MAX_DEPTH: usize = (0.2 / UNIT * 4.0) as usize;
+
     for pos in initial_positions {
         candidates.push(HeapItem {
             dist: 0,
-            depth: 10,
+            depth: MAX_DEPTH,
             src: pos,
             pos,
         });
@@ -594,7 +602,7 @@ fn inject_at<V: Voxel>(
 
         for dir in directions {
             let next: VoxelIdx = pos + dir.into();
-            if next[2] < zlow || next[2] > zhigh {
+            if !zrange.contains(&next[2]) {
                 continue;
             }
             if visited.occupied(next) {
@@ -627,8 +635,7 @@ fn generate_inject(out: &str) -> Result<()> {
     for step in 0..(dist / dist_per_step) {
         inject_at(
             &mut mv,
-            -5,
-            5,
+            -5..5,
             [step * dist_per_step, 0, 0].into(),
             [step * dist_per_step, 0, 0].into(),
             (inject_per_dist * dist_per_step) as usize,
@@ -699,6 +706,7 @@ fn generate_gcode<V: Voxel + Default>(
     // TODO: extract from gcode
     const LAYER_HEIGHT: f32 = 0.2f32;
     const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
+    const Z_OFFSET_UP: i32 = (LAYER_HEIGHT / UNIT / 2.0) as i32;
 
     let gcode = std::fs::read_to_string(filename)?;
 
@@ -820,21 +828,19 @@ fn generate_gcode<V: Voxel + Default>(
 
                     // in centimeters
                     let delta_e = dst_e - e;
+                    if delta_e <= 0.0 {
+                        continue;
+                    }
 
                     // flow rate calculation
-                    // block volume in cubic millimeters
-                    let block_volume = UNIT * UNIT * UNIT;
 
                     // with 1.75mm filament, calculate volume, in millimeters
-                    let filament_diameter = 1.75f32;
-                    let filament_cross_section =
-                        0.25f32 * std::f32::consts::PI * filament_diameter * filament_diameter;
-                    let filament_volume = delta_e * filament_cross_section;
+                    let filament_volume = delta_e * FILAMENT_CROSS_SECION;
 
                     // TODO: accurate volume calculation
-                    let total_blocks = filament_volume / block_volume;
+                    let total_blocks = filament_volume / BLOCK_VOLUME;
                     let mut blocks = total_blocks as usize;
-                    let step_size = 0.2;
+                    let step_size = 1.0;
                     let blocks_per_step = (total_blocks * step_size / len) as usize;
 
                     debug!(
@@ -852,10 +858,13 @@ fn generate_gcode<V: Voxel + Default>(
                         let pos = to_intpos([cursor[0], cursor[1], cursor[2]]);
                         let next_pos = to_intpos([next[0], next[1], next[2]]);
                         let z = next_pos[2];
-                        let injected =
-                            inject_at(&mut mv, z - Z_OFFSET, z, pos, next_pos, blocks_per_step);
+                        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+                        let injected = inject_at(&mut mv, zrange, pos, next_pos, blocks_per_step);
                         if injected != blocks_per_step {
-                            debug!("injected != blocks_per_step, skipping");
+                            debug!(
+                                "injected != blocks_per_step, skipping: {} != {}",
+                                injected, blocks_per_step
+                            );
                         }
                         cursor = next;
                         blocks -= blocks_per_step;
@@ -866,20 +875,10 @@ fn generate_gcode<V: Voxel + Default>(
                         let next_pos = to_intpos([dst[0], dst[1], dst[2]]);
 
                         let z = next_pos[2];
-                        let injected =
-                            inject_at(&mut mv, z - Z_OFFSET, z, pos, next_pos, blocks);
+                        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+                        let injected = inject_at(&mut mv, zrange, pos, next_pos, blocks);
                         if injected != blocks {
-                            debug!("injected != blocks_per_step, skipping");
-                        }
-                    }
-
-                    {
-                        let next_pos = to_intpos([dst[0], dst[1], dst[2]]);
-                        let z = next_pos[2];
-                        let injected =
-                            inject_at(&mut mv, z - Z_OFFSET, z, next_pos, next_pos, blocks);
-                        if injected != blocks {
-                            debug!("injected != blocks_per_step, skipping");
+                            debug!("injected != blocks, skipping: {} != {}", injected, blocks);
                         }
                     }
 
