@@ -41,7 +41,7 @@ impl Voxel for FSNVoxel {
             let by = base[1] as u32;
             let bz = base[2] as u32;
 
-            let mut sdf = [-1.0; ChunkShape::USIZE];
+            let mut sdf = [1.0; ChunkShape::USIZE];
             for i in 0u32..ChunkShape::SIZE {
                 let [x, y, z] = ChunkShape::delinearize(i);
                 if x == 0
@@ -57,12 +57,12 @@ impl Voxel for FSNVoxel {
                         bz as i32 + z as i32 - 1,
                     ]);
                     if self.occupied(worldpos) {
-                        sdf[i as usize] = 1.0;
+                        sdf[i as usize] = -1.0;
                     }
                     continue;
                 }
                 if cell.get(x as usize - 1, y as usize - 1, z as usize - 1) {
-                    sdf[i as usize] = 1.0;
+                    sdf[i as usize] = -1.0;
                 }
             }
 
