@@ -71,13 +71,14 @@ impl Voxel for IsoVoxel {
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
+        const CELL_SIZE_F32: f32 = CELL_SIZE as f32;
 
         for (&idx, cell) in self.chunks.iter() {
             let base = chunk_base(idx);
             let view = ChunkView { cell };
 
             let mut model = Model::default();
-            let mut cubes = isosurface::marching_cubes::MarchingCubes::new(32);
+            let mut cubes = isosurface::marching_cubes::MarchingCubes::new(CELL_SIZE);
 
             let mut vertices = vec![];
             let mut indices = vec![];
@@ -90,9 +91,9 @@ impl Voxel for IsoVoxel {
             let bz = base.idx[2] as f32;
 
             for i in 0..vertex_count {
-                let x = vertices[i * 3] * 32.0 + bx;
-                let y = vertices[i * 3 + 1] * 32.0 + by;
-                let z = vertices[i * 3 + 2] * 32.0 + bz;
+                let x = vertices[i * 3] * CELL_SIZE_F32 + bx;
+                let y = vertices[i * 3 + 1] * CELL_SIZE_F32 + by;
+                let z = vertices[i * 3 + 2] * CELL_SIZE_F32 + bz;
                 model.raw_vertices.push([x, y, z]);
             }
 

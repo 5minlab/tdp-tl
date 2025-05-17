@@ -79,7 +79,7 @@ impl Voxel for LodVoxel {
             let subdivisions = 16;
             let block = Block::from(
                 [base.idx[0] as f32, base.idx[1] as f32, base.idx[2] as f32],
-                32.0,
+                CELL_SIZE as f32,
                 subdivisions,
             );
             let source = WorldMappingVoxelSource {

@@ -3,11 +3,13 @@ use binary_greedy_meshing as bgm;
 use std::cell::Cell;
 use std::collections::BTreeSet;
 
+pub const CELL_SIZE: usize = 32;
+
 #[derive(Debug)]
 pub struct BGMCell {
     // 32 x 32 x 32 cell, 1 bit per voxel
     pub dirty: Cell<bool>,
-    data: [u32; 1024],
+    data: [u32; CELL_SIZE * CELL_SIZE],
 }
 
 impl std::default::Default for BGMCell {
@@ -45,7 +47,7 @@ impl BGMCell {
             let y = (i & 0b11111) as usize;
             let offset = (x + 1) * bgm::CS_P + (y + 1) * bgm::CS_P2;
 
-            for z in 0..32 {
+            for z in 0..CELL_SIZE {
                 let v = if data & (1 << z) > 0 { 1 } else { 0 };
                 let idx = offset + z + 1;
                 voxels[idx] = v;
@@ -122,9 +124,9 @@ impl BGMCell {
 const BITS: u64 = 21;
 const MASK: u64 = (1 << BITS) - 1;
 pub fn chunk_idx(coord: VoxelIdx) -> u64 {
-    let x = coord.idx[0].div_euclid(32);
-    let y = coord.idx[1].div_euclid(32);
-    let z = coord.idx[2].div_euclid(32);
+    let x = coord.idx[0].div_euclid(CELL_SIZE as i32);
+    let y = coord.idx[1].div_euclid(CELL_SIZE as i32);
+    let z = coord.idx[2].div_euclid(CELL_SIZE as i32);
 
     let pack_axis = |v: i32| -> u64 { unsafe { std::mem::transmute::<_, u32>(v) as u64 } };
 
@@ -154,8 +156,8 @@ fn rem_euclid(a: i32, b: i32) -> i32 {
 }
 
 pub fn cell_idx(coord: VoxelIdx) -> [usize; 3] {
-    let x = rem_euclid(coord.idx[0], 32) as usize;
-    let y = rem_euclid(coord.idx[1], 32) as usize;
-    let z = rem_euclid(coord.idx[2], 32) as usize;
+    let x = rem_euclid(coord.idx[0], CELL_SIZE as i32) as usize;
+    let y = rem_euclid(coord.idx[1], CELL_SIZE as i32) as usize;
+    let z = rem_euclid(coord.idx[2], CELL_SIZE as i32) as usize;
     [x, y, z]
 }
