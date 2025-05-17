@@ -25,6 +25,9 @@ use chunkedvoxel::ChunkedVoxel;
 mod lodvoxel;
 use lodvoxel::LodVoxel;
 
+mod isovoxel;
+use isovoxel::IsoVoxel;
+
 #[derive(FromArgs)]
 /// toplevel
 struct TopLevel {
@@ -122,13 +125,17 @@ struct SubCommandGcodeLayers {
     #[argh(switch)]
     svo: bool,
 
-    /// use svo data structure
+    /// chunked
     #[argh(switch)]
     chunked: bool,
 
-    /// use svo data structure
+    /// lod
     #[argh(switch)]
     lod: bool,
+
+    /// iso
+    #[argh(switch)]
+    iso: bool,
 
     /// glb
     #[argh(switch)]
@@ -316,20 +323,25 @@ fn model_serialize_gltf(
                 })
                 .collect::<Vec<_>>();
 
-            let normals = model
-                .raw_normals
-                .iter()
-                .map(|idx| nalgebra::Vector3::new(idx[0], idx[2], -idx[1]))
-                .collect::<Vec<_>>();
-
-            assert_eq!(positions.len(), normals.len());
+            let normals = if model.raw_normals.is_empty() {
+                None
+            } else {
+                assert_eq!(positions.len(), model.raw_normals.len());
+                Some(
+                    model
+                        .raw_normals
+                        .iter()
+                        .map(|idx| nalgebra::Vector3::new(idx[0], idx[2], -idx[1]))
+                        .collect::<Vec<_>>(),
+                )
+            };
 
             let name = format!("raw_{}", i);
             let mesh = builder.create_custom_mesh(
                 Some(name.clone()),
                 &positions,
                 &indices,
-                Some(normals),
+                normals,
                 None,
                 Some(material),
             );
@@ -897,6 +909,8 @@ fn main() -> Result<()> {
                 generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.lod {
                 generate_gcode::<LodVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+            } else if opt.iso {
+                generate_gcode::<IsoVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }

@@ -74,9 +74,9 @@ impl Voxel for LodVoxel {
             let base = chunk_base(idx);
             let mut model = Model::default();
 
-            let threshold = 0f32;
+            let threshold = 0.5f32;
 
-            let subdivisions = 32;
+            let subdivisions = 16;
             let block = Block::from(
                 [base.idx[0] as f32, base.idx[1] as f32, base.idx[2] as f32],
                 32.0,
