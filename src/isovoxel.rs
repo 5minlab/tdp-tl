@@ -1,27 +1,52 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use super::cell::*;
-use ahash::AHashMap;
+use super::chunkedvoxel::ChunkedBase;
 use isosurface::distance::*;
 use std::rc::Rc;
 
 #[derive(Default)]
 pub struct IsoVoxel {
-    chunks: AHashMap<u64, BGMCell>,
-    bb: BoundingBox,
+    base: ChunkedBase,
 }
 
 struct ChunkView<'a> {
+    parent: &'a IsoVoxel,
+    base: VoxelIdx,
     cell: &'a BGMCell,
 }
 
 impl<'a> isosurface::sampler::Sample<Signed> for ChunkView<'a> {
     fn sample(&self, p: isosurface::math::vector::Vec3) -> Signed {
-        // 0.0 to 0, 1.0 to 31
-        let x = ((p.x - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
-        let y = ((p.y - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
-        let z = ((p.z - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
-        if self.cell.get(x, y, z) {
+        // 0.0 to 0, 1.0 to 32 + 1
+        let x = (p.x * CELL_SIZE as f32 + 0.5) as usize;
+        let y = (p.y * CELL_SIZE as f32 + 0.5) as usize;
+        let z = (p.z * CELL_SIZE as f32 + 0.5) as usize;
+
+        if x == 0
+            || y == 0
+            || z == 0
+            || x == (CELL_SIZE + 1)
+            || y == (CELL_SIZE + 1)
+            || z == (CELL_SIZE + 1)
+        {
+            let bx = self.base[0] as u32;
+            let by = self.base[1] as u32;
+            let bz = self.base[2] as u32;
+
+            let worldpos = VoxelIdx::new([
+                bx as i32 + x as i32 - 1,
+                by as i32 + y as i32 - 1,
+                bz as i32 + z as i32 - 1,
+            ]);
+            if self.parent.occupied(worldpos) {
+                return Signed(1.0);
+            } else {
+                return Signed(-1.0);
+            }
+        }
+
+        if self.cell.get(x - 1, y - 1, z - 1) {
             Signed(1.0)
         } else {
             Signed(-1.0)
@@ -35,52 +60,31 @@ impl Voxel for IsoVoxel {
     }
 
     fn bounding_box(&self) -> &BoundingBox {
-        &self.bb
+        &self.base.bb
     }
 
     fn occupied(&self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        if let Some(cell) = self.chunks.get(&idx) {
-            let [x, y, z] = cell_idx(coord);
-            cell.get(x, y, z)
-        } else {
-            false
-        }
+        self.base.occupied(coord)
     }
 
     fn add(&mut self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        let [x, y, z] = cell_idx(coord);
-
-        if let Some(cell) = self.chunks.get_mut(&idx) {
-            self.bb.add(coord);
-
-            if cell.get(x, y, z) {
-                return false;
-            }
-
-            cell.set(x, y, z);
-            true
-        } else {
-            let mut cell = BGMCell::default();
-            self.bb.add(coord);
-
-            cell.set(x, y, z);
-            self.chunks.insert(idx, cell);
-            true
-        }
+        self.base.add(coord)
     }
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
         const CELL_SIZE_F32: f32 = CELL_SIZE as f32;
 
-        for (&idx, cell) in self.chunks.iter() {
+        for (&idx, cell) in self.base.chunks.iter() {
             let base = chunk_base(idx);
-            let view = ChunkView { cell };
+            let view = ChunkView {
+                parent: self,
+                base,
+                cell,
+            };
 
             let mut model = Model::default();
-            let mut cubes = isosurface::MarchingCubes::new(CELL_SIZE / 2);
+            let mut cubes = isosurface::MarchingCubes::new(CELL_SIZE + 2);
 
             let mut vertices = vec![];
             let mut indices = vec![];

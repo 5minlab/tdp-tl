@@ -1,24 +1,23 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use super::cell::*;
-use ahash::AHashMap;
+use super::chunkedvoxel::ChunkedBase;
 use std::rc::Rc;
 
 use transvoxel::voxel_source::*;
 
 #[derive(Default)]
 pub struct LodVoxel {
-    chunks: AHashMap<u64, BGMCell>,
-    bb: BoundingBox,
+    base: ChunkedBase,
 }
 
 impl<'a> DataField<f32, f32> for &'a LodVoxel {
     fn get_data(&mut self, x: f32, y: f32, z: f32) -> f32 {
         let coord = VoxelIdx::new([x as i32, y as i32, z as i32]);
-        if self.occupied(coord) {
+        if self.base.occupied(coord) {
             1.0
         } else {
-            0.0
+            -1.0
         }
     }
 }
@@ -29,52 +28,27 @@ impl Voxel for LodVoxel {
     }
 
     fn bounding_box(&self) -> &BoundingBox {
-        &self.bb
+        &self.base.bb
     }
 
     fn occupied(&self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        if let Some(cell) = self.chunks.get(&idx) {
-            let [x, y, z] = cell_idx(coord);
-            cell.get(x, y, z)
-        } else {
-            false
-        }
+        self.base.occupied(coord)
     }
 
     fn add(&mut self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        let [x, y, z] = cell_idx(coord);
-
-        if let Some(cell) = self.chunks.get_mut(&idx) {
-            self.bb.add(coord);
-
-            if cell.get(x, y, z) {
-                return false;
-            }
-
-            cell.set(x, y, z);
-            true
-        } else {
-            let mut cell = BGMCell::default();
-            self.bb.add(coord);
-
-            cell.set(x, y, z);
-            self.chunks.insert(idx, cell);
-            true
-        }
+        self.base.add(coord)
     }
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
 
-        for (&idx, _cell) in self.chunks.iter() {
+        for (&idx, _cell) in self.base.chunks.iter() {
             use transvoxel::prelude::*;
 
             let base = chunk_base(idx);
             let mut model = Model::default();
 
-            let threshold = 0.5f32;
+            let threshold = 0.0f32;
 
             let subdivisions = 16;
             let block = Block::from(

@@ -2,27 +2,18 @@ use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use crate::cell::*;
 use ahash::AHashMap;
+use binary_greedy_meshing as bgm;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use binary_greedy_meshing as bgm;
 #[derive(Default)]
-pub struct ChunkedVoxel {
-    chunks: AHashMap<u64, BGMCell>,
-    models: HashMap<u64, Rc<Model>>,
-    bb: BoundingBox,
+pub struct ChunkedBase {
+    pub chunks: AHashMap<u64, BGMCell>,
+    pub bb: BoundingBox,
 }
 
-impl Voxel for ChunkedVoxel {
-    fn ranges(&self) -> usize {
-        0
-    }
-
-    fn bounding_box(&self) -> &BoundingBox {
-        &self.bb
-    }
-
-    fn occupied(&self, coord: VoxelIdx) -> bool {
+impl ChunkedBase {
+    pub fn occupied(&self, coord: VoxelIdx) -> bool {
         let idx = chunk_idx(coord);
         if let Some(cell) = self.chunks.get(&idx) {
             let [x, y, z] = cell_idx(coord);
@@ -32,7 +23,7 @@ impl Voxel for ChunkedVoxel {
         }
     }
 
-    fn add(&mut self, coord: VoxelIdx) -> bool {
+    pub fn add(&mut self, coord: VoxelIdx) -> bool {
         let idx = chunk_idx(coord);
         let [x, y, z] = cell_idx(coord);
 
@@ -54,6 +45,30 @@ impl Voxel for ChunkedVoxel {
             true
         }
     }
+}
+
+#[derive(Default)]
+pub struct ChunkedVoxel {
+    base: ChunkedBase,
+    models: HashMap<u64, Rc<Model>>,
+}
+
+impl Voxel for ChunkedVoxel {
+    fn ranges(&self) -> usize {
+        0
+    }
+
+    fn bounding_box(&self) -> &BoundingBox {
+        &self.base.bb
+    }
+
+    fn occupied(&self, coord: VoxelIdx) -> bool {
+        self.base.occupied(coord)
+    }
+
+    fn add(&mut self, coord: VoxelIdx) -> bool {
+        self.base.add(coord)
+    }
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
@@ -61,7 +76,7 @@ impl Voxel for ChunkedVoxel {
 
         let mut dirty = 0;
         let mut count = 0;
-        for (&idx, cell) in self.chunks.iter() {
+        for (&idx, cell) in self.base.chunks.iter() {
             if !cell.dirty.get() {
                 if let Some(model) = self.models.get(&idx) {
                     models.push(model.clone());
@@ -83,7 +98,7 @@ impl Voxel for ChunkedVoxel {
         eprintln!(
             "dirty: {}/{}, quad_count: {}",
             dirty,
-            self.chunks.len(),
+            self.base.chunks.len(),
             count
         );
 

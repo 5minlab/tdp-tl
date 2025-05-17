@@ -1,7 +1,7 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use super::cell::*;
-use ahash::AHashMap;
+use super::chunkedvoxel::ChunkedBase;
 use fast_surface_nets::ndshape::{ConstShape, ConstShape3u32};
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use std::rc::Rc;
@@ -12,8 +12,7 @@ type ChunkShape = ConstShape3u32<PADDED_SIZE, PADDED_SIZE, PADDED_SIZE>;
 
 #[derive(Default)]
 pub struct FSNVoxel {
-    chunks: AHashMap<u64, BGMCell>,
-    bb: BoundingBox,
+    base: ChunkedBase,
 }
 
 impl Voxel for FSNVoxel {
@@ -22,46 +21,21 @@ impl Voxel for FSNVoxel {
     }
 
     fn bounding_box(&self) -> &BoundingBox {
-        &self.bb
+        &self.base.bb
     }
 
     fn occupied(&self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        if let Some(cell) = self.chunks.get(&idx) {
-            let [x, y, z] = cell_idx(coord);
-            cell.get(x, y, z)
-        } else {
-            false
-        }
+        self.base.occupied(coord)
     }
 
     fn add(&mut self, coord: VoxelIdx) -> bool {
-        let idx = chunk_idx(coord);
-        let [x, y, z] = cell_idx(coord);
-
-        if let Some(cell) = self.chunks.get_mut(&idx) {
-            self.bb.add(coord);
-
-            if cell.get(x, y, z) {
-                return false;
-            }
-
-            cell.set(x, y, z);
-            true
-        } else {
-            let mut cell = BGMCell::default();
-            self.bb.add(coord);
-
-            cell.set(x, y, z);
-            self.chunks.insert(idx, cell);
-            true
-        }
+        self.base.add(coord)
     }
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
 
-        for (&idx, cell) in self.chunks.iter() {
+        for (&idx, cell) in self.base.chunks.iter() {
             let base = chunk_base(idx);
             let bx = base[0] as u32;
             let by = base[1] as u32;
