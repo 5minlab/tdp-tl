@@ -2,6 +2,7 @@ use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use super::cell::*;
 use ahash::AHashMap;
+use isosurface::distance::*;
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -14,15 +15,16 @@ struct ChunkView<'a> {
     cell: &'a BGMCell,
 }
 
-impl<'a> isosurface::source::Source for ChunkView<'a> {
-    fn sample(&self, x: f32, y: f32, z: f32) -> f32 {
-        let x = (x * 31.0) as usize;
-        let y = (y * 31.0) as usize;
-        let z = (z * 31.0) as usize;
+impl<'a> isosurface::sampler::Sample<Signed> for ChunkView<'a> {
+    fn sample(&self, p: isosurface::math::vector::Vec3) -> Signed {
+        // 0.0 to 0, 1.0 to 31
+        let x = ((p.x - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
+        let y = ((p.y - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
+        let z = ((p.z - std::f32::EPSILON) * CELL_SIZE as f32) as usize;
         if self.cell.get(x, y, z) {
-            1.0
+            Signed(1.0)
         } else {
-            0.0
+            Signed(-1.0)
         }
     }
 }
@@ -78,11 +80,14 @@ impl Voxel for IsoVoxel {
             let view = ChunkView { cell };
 
             let mut model = Model::default();
-            let mut cubes = isosurface::marching_cubes::MarchingCubes::new(CELL_SIZE);
+            let mut cubes = isosurface::MarchingCubes::new(CELL_SIZE / 2);
 
             let mut vertices = vec![];
             let mut indices = vec![];
-            cubes.extract(&view, &mut vertices, &mut indices);
+            cubes.extract(
+                &view,
+                &mut isosurface::extractor::IndexedVertices::new(&mut vertices, &mut indices),
+            );
 
             let vertex_count = vertices.len() / 3;
 
