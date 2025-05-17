@@ -277,7 +277,7 @@ fn model_serialize_gltf(
     use mesh_tools::{GltfBuilder, Triangle};
     let mut builder = GltfBuilder::new();
 
-    let material = builder.create_basic_material(Some("grey".to_owned()), [0.5, 0.5, 0.5, 1.0]);
+    let material = builder.create_basic_material(Some("red".to_owned()), [1.0, 0.2, 0.2, 1.0]);
     let mut nodes = vec![];
 
     for (i, model) in models.iter().enumerate() {
