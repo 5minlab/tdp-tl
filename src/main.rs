@@ -4,7 +4,6 @@ use log::*;
 use nalgebra::Point3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
-use std::ops::Range;
 use std::rc::Rc;
 
 mod cell;
@@ -24,6 +23,9 @@ mod isovoxel;
 use isovoxel::IsoVoxel;
 mod fsnvoxel;
 use fsnvoxel::FSNVoxel;
+
+mod inject;
+use inject::*;
 
 #[derive(FromArgs)]
 /// toplevel
@@ -188,6 +190,8 @@ const FILAMENT_CROSS_SECION: f32 =
 const LAYER_HEIGHT: f32 = 0.2f32;
 const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
 const Z_OFFSET_UP: i32 = 1;
+
+const NOZZLE_SIZE: f32 = 0.4f32;
 
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
@@ -503,127 +507,6 @@ fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
     Ok(())
 }
 
-fn inject_at<V: Voxel>(
-    v: &mut V,
-    zrange: Range<i32>,
-    pos0: VoxelIdx,
-    pos1: VoxelIdx,
-    n: usize,
-) -> usize {
-    use std::collections::BinaryHeap;
-
-    if n == 0 {
-        return 0;
-    }
-
-    let mut injected = 0;
-
-    #[derive(Clone, Copy, Ord, PartialEq, Eq, Debug)]
-    struct HeapItem {
-        dist: usize,
-        src: VoxelIdx,
-        pos: VoxelIdx,
-    }
-    impl std::cmp::PartialOrd for HeapItem {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(other.dist.cmp(&self.dist))
-        }
-    }
-
-    let mut candidates = BinaryHeap::new();
-    let mut visited = ChunkedVoxel::default();
-
-    let mut initial_positions = vec![];
-    {
-        let dx = (pos1[0] - pos0[0]) as f32;
-        let dy = (pos1[1] - pos0[1]) as f32;
-        let dz = (pos1[2] - pos0[2]) as f32;
-
-        let mut x = pos0[0] as f32;
-        let mut y = pos0[1] as f32;
-        let mut z = pos0[2] as f32;
-
-        let mut cur = pos0;
-        initial_positions.push(cur);
-        loop {
-            x += dx * 0.2;
-            y += dy * 0.2;
-            z += dz * 0.2;
-            let next = VoxelIdx::new([x, y, z].map(|v| v.round() as i32));
-            if next == pos1 {
-                break;
-            }
-            if next == cur {
-                continue;
-            }
-
-            initial_positions.push(next);
-            cur = next;
-        }
-    }
-
-    const MAX_DIST_AXIS: usize = (LAYER_HEIGHT / UNIT) as usize;
-    const MAX_DIST_SQ: usize = MAX_DIST_AXIS * MAX_DIST_AXIS * MAX_DIST_AXIS * 4;
-
-    for pos in initial_positions {
-        candidates.push(HeapItem {
-            dist: 0,
-            src: pos,
-            pos,
-        });
-    }
-
-    while let Some(HeapItem {
-        dist: _dist,
-        src,
-        pos,
-    }) = candidates.pop()
-    {
-        if !visited.add(pos) {
-            continue;
-        }
-
-        if v.add(pos) {
-            injected += 1;
-            if n == injected {
-                break;
-            }
-        }
-
-        let directions = [
-            [1, 0, 0],
-            [-1, 0, 0],
-            [0, 1, 0],
-            [0, -1, 0],
-            [0, 0, 1],
-            [0, 0, -1],
-        ];
-
-        for dir in directions {
-            let next: VoxelIdx = pos + dir.into();
-            if !zrange.contains(&next[2]) {
-                continue;
-            }
-            if visited.occupied(next) {
-                continue;
-            }
-
-            let delta = src - next;
-            let dist = delta.magnitude_squared();
-            if dist > MAX_DIST_SQ {
-                continue;
-            }
-            candidates.push(HeapItem {
-                dist,
-                src,
-                pos: next,
-            });
-        }
-    }
-
-    injected
-}
-
 fn generate_inject(out: &str) -> Result<()> {
     let mut mv = MonotonicVoxel::default();
 
@@ -634,11 +517,11 @@ fn generate_inject(out: &str) -> Result<()> {
     let dist_per_step = 5;
     let dist = 100;
     for step in 0..(dist / dist_per_step) {
+        let p = VoxelIdx::from([step * dist_per_step, 0, 0]);
         inject_at(
             &mut mv,
             -5..5,
-            [step * dist_per_step, 0, 0].into(),
-            [step * dist_per_step, 0, 0].into(),
+            &[p],
             (inject_per_dist * dist_per_step) as usize,
         );
     }
@@ -705,13 +588,12 @@ fn generate_gcode<V: Voxel + Default>(
 
     let gcode = std::fs::read_to_string(filename)?;
 
-    fn to_intpos(pos: [f32; 3]) -> VoxelIdx {
-        return [
-            (pos[0] / UNIT).round() as i32,
-            (pos[1] / UNIT).round() as i32,
-            (pos[2] / UNIT).round() as i32,
-        ]
-        .into();
+    fn intpos(v: f32) -> i32 {
+        (v / UNIT).round() as i32
+    }
+
+    fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
+        [intpos(pos[0]), intpos(pos[1]), intpos(pos[2])].into()
     }
 
     let sw = Stopwatch::start_new();
@@ -743,9 +625,10 @@ fn generate_gcode<V: Voxel + Default>(
                 }
 
                 if out_layers {
+                    let last_dt = last_sw.ms();
                     let sw = Stopwatch::start_new();
                     let model = mv.to_model();
-                    info!("to_model: took={:.2}ms/{:.2}ms", last_sw.ms(), sw.ms());
+                    info!("to_model: took={:.2}ms/{:.2}ms", last_dt, sw.ms());
 
                     let sw = Stopwatch::start_new();
 
@@ -827,8 +710,31 @@ fn generate_gcode<V: Voxel + Default>(
                         continue;
                     }
 
-                    // flow rate calculation
+                    // no inter-layer injection
+                    assert!(dir.z <= 0.0);
 
+                    let z = intpos(dst[2]);
+                    let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+
+                    let offsets = [
+                        Vector3::new(0.0, 0.0, 0.0),
+                        Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                        Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+                        Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                        Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+                    ];
+
+                    let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
+                        let mut cells = vec![];
+                        for offset in &offsets {
+                            let pos = to_intpos(from + offset);
+                            let next_pos = to_intpos(to + offset);
+                            line_cells(pos, next_pos, &mut cells);
+                        }
+                        cells
+                    };
+
+                    // flow rate calculation
                     // with 1.75mm filament, calculate volume, in millimeters
                     let filament_volume = delta_e * FILAMENT_CROSS_SECION;
 
@@ -850,11 +756,9 @@ fn generate_gcode<V: Voxel + Default>(
                     let mut cursor = pos;
                     while (cursor - dst).magnitude() > step_size {
                         let next = cursor + dir * step_size;
-                        let pos = to_intpos([cursor[0], cursor[1], cursor[2]]);
-                        let next_pos = to_intpos([next[0], next[1], next[2]]);
-                        let z = next_pos[2];
-                        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
-                        let injected = inject_at(&mut mv, zrange, pos, next_pos, blocks_per_step);
+
+                        let cells = gen_cells(cursor, next);
+                        let injected = inject_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
                         if injected != blocks_per_step {
                             debug!(
                                 "injected != blocks_per_step, skipping: {} != {}",
@@ -866,12 +770,8 @@ fn generate_gcode<V: Voxel + Default>(
                     }
                     // last segment
                     if blocks > 0 {
-                        let pos = to_intpos([cursor[0], cursor[1], cursor[2]]);
-                        let next_pos = to_intpos([dst[0], dst[1], dst[2]]);
-
-                        let z = next_pos[2];
-                        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
-                        let injected = inject_at(&mut mv, zrange, pos, next_pos, blocks);
+                        let cells = gen_cells(cursor, dst);
+                        let injected = inject_at(&mut mv, zrange.clone(), &cells, blocks);
                         if injected != blocks {
                             debug!("injected != blocks, skipping: {} != {}", injected, blocks);
                         }
