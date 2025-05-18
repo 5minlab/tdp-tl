@@ -175,10 +175,6 @@ impl BoundingBox {
     }
 }
 
-// unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
-// 20mm
-const UNIT: f32 = 0.04f32;
-
 // block volume in cubic millimeters
 const BLOCK_VOLUME: f32 = UNIT * UNIT * UNIT;
 const FILAMENT_DIAMETER: f32 = 1.75f32;
@@ -192,6 +188,13 @@ const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
 const Z_OFFSET_UP: i32 = 1;
 
 const NOZZLE_SIZE: f32 = 0.4f32;
+
+// unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
+const UNIT: f32 = LAYER_HEIGHT / 5.0;
+
+// tunables
+const INJECT_OFFSET_Z: f32 = LAYER_HEIGHT / 5.0;
+
 
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
@@ -716,12 +719,13 @@ fn generate_gcode<V: Voxel + Default>(
                     let z = intpos(dst[2]);
                     let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
 
+                    let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
                     let offsets = [
-                        Vector3::new(0.0, 0.0, 0.0),
-                        Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                        Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
-                        Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                        Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+                        oz + Vector3::new(0.0, 0.0, 0.0),
+                        oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                        oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+                        oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                        oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
                     ];
 
                     let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
