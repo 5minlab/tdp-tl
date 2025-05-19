@@ -662,6 +662,23 @@ fn generate_gcode<V: Voxel + Default>(
                 if code.mnemonic != Mnemonic::General {
                     continue;
                 }
+
+                if code.major == 92 {
+                    for (letter, value) in code.arguments() {
+                        let letter = *letter;
+                        let v = match value {
+                            Some(v) => *v,
+                            None => continue,
+                        };
+
+                        if letter == 'E' {
+                            e = v;
+                        } else {
+                            todo!();
+                        }
+                    }
+                }
+
                 if code.major == 0 {
                     for (letter, value) in code.arguments() {
                         let letter = *letter;
