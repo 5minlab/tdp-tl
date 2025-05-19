@@ -201,6 +201,10 @@ pub trait Voxel: Default {
     fn occupied(&self, coord: VoxelIdx) -> bool;
     fn add(&mut self, coord: VoxelIdx) -> bool;
     fn to_model(&mut self) -> Vec<Rc<Model>>;
+
+    fn debug(&self, _filename: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]

@@ -1,4 +1,6 @@
-use super::{BoundingBox, Model, Voxel, VoxelIdx};
+use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
+use anyhow::Result;
+use std::collections::BTreeSet;
 
 use crate::cell::*;
 use ahash::AHashMap;
@@ -105,5 +107,37 @@ impl Voxel for ChunkedVoxel {
         );
 
         models
+    }
+
+    fn debug(&self, filename: &str) -> Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        let writer = std::fs::File::create(filename)?;
+        let mut writer = std::io::BufWriter::new(writer);
+        let mut voxels = [0; bgm::CS_P3];
+
+        writer.write_f32::<LittleEndian>(UNIT)?;
+
+        writer.write_u32::<LittleEndian>(self.base.chunks.len() as u32)?;
+        for (&idx, cell) in self.base.chunks.iter() {
+            let base = chunk_base(idx);
+            writer.write_i32::<LittleEndian>(base[0])?;
+            writer.write_i32::<LittleEndian>(base[1])?;
+            writer.write_i32::<LittleEndian>(base[2])?;
+
+            // cell.fill_bgm(&mut voxels, 0);
+            cell.fill_bgm_solid(&mut voxels);
+            let mut mesh_data = bgm::MeshData::new();
+            bgm::mesh(&mut voxels, &mut mesh_data, BTreeSet::default());
+
+            for quads in mesh_data.quads.iter() {
+                writer.write_u32::<LittleEndian>(quads.len() as u32)?;
+                for quad in quads.iter() {
+                    writer.write_u32::<LittleEndian>(*quad as u32)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
