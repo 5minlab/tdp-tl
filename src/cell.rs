@@ -21,6 +21,42 @@ impl std::default::Default for BGMCell {
     }
 }
 
+pub fn decode_quad(quad: u64) -> (VoxelIdx, [i32; 2]) {
+    let x = (quad & 0b111111) as i32;
+    let y = ((quad >> 6) & 0b111111) as i32;
+    let z = ((quad >> 12) & 0b111111) as i32;
+    let w = ((quad >> 18) & 0b111111) as i32;
+    let h = ((quad >> 24) & 0b111111) as i32;
+    (VoxelIdx::from([x, y, z]), [w as i32, h as i32])
+}
+
+/// Call `op(index)` exactly once for every boundary voxel.
+#[inline(always)]
+fn for_each_shell<F: FnMut(usize, usize, usize)>(n: usize, mut op: F) {
+    let max = n - 1;
+
+    for &z in &[0, max] {
+        for y in 0..n {
+            for x in 0..n {
+                op(x, y, z);
+            }
+        }
+    }
+
+    for z in 1..max {
+        for &y in &[0, max] {
+            for x in 0..n {
+                op(x, y, z);
+            }
+        }
+
+        for y in 1..max {
+            op(0, y, z);
+            op(max, y, z);
+        }
+    }
+}
+
 impl BGMCell {
     fn index(x: usize, y: usize) -> usize {
         (x << 5) | y
@@ -40,34 +76,85 @@ impl BGMCell {
         self.dirty.set(true);
     }
 
-    fn fill_bgm(&self, voxels: &mut [u16; bgm::CS_P3]) {
+    pub fn fill_bgm_solid(&self, voxels: &mut [u16; bgm::CS_P3]) {
+        use std::collections::VecDeque;
+        // first bit: cells, seconds bit: to_visit
+
+        const VALUE_MASK: u16 = 0b01;
+        const TOVISIT_MASK: u16 = 0b10;
+        self.fill_bgm(voxels, TOVISIT_MASK);
+
+        for_each_shell(34, |x, y, z| {
+            let idx = z + x * bgm::CS_P + y * bgm::CS_P2;
+            voxels[idx] = TOVISIT_MASK;
+        });
+
+        // bfs surface search
+        let mut queue = VecDeque::new();
+        queue.push_back(0);
+
+        const OFFSETS: [usize; 3] = [
+            1,
+            bgm::CS_P,
+            bgm::CS_P2,
+        ];
+
+        while let Some(idx) = queue.pop_front() {
+            if voxels[idx] & TOVISIT_MASK == 0 {
+                continue;
+            }
+            voxels[idx] &= !TOVISIT_MASK;
+
+            let mut visit = |idx: usize| {
+                let v = voxels[idx];
+                // filled, skip
+                if v & VALUE_MASK != 0 {
+                    return;
+                }
+                // already visited, skip
+                if v & TOVISIT_MASK == 0 {
+                    return;
+                }
+                queue.push_back(idx);
+            };
+
+            for offset in OFFSETS {
+                if idx + offset < bgm::CS_P3 {
+                    visit(idx + offset);
+                }
+                if idx >= offset {
+                    visit(idx - offset);
+                }
+            }
+        }
+
+        // TOVISIT to value
+        for i in 0..bgm::CS_P3 {
+            if voxels[i] & TOVISIT_MASK != 0 {
+                voxels[i] = VALUE_MASK;
+            }
+        }
+    }
+
+    pub fn fill_bgm(&self, voxels: &mut [u16; bgm::CS_P3], xor: u16) {
         for i in 0..1024 {
             let data = self.data[i];
             let x = (i >> 5) & 0b11111;
             let y = (i & 0b11111) as usize;
-            let offset = (x + 1) * bgm::CS_P + (y + 1) * bgm::CS_P2;
+            let offset = 1 + (x + 1) * bgm::CS_P + (y + 1) * bgm::CS_P2;
 
             for z in 0..CELL_SIZE {
-                let v = if data & (1 << z) > 0 { 1 } else { 0 };
-                let idx = offset + z + 1;
-                voxels[idx] = v;
+                let idx = offset + z;
+                voxels[idx] = ((data >> z) & 1) as u16 ^ xor;
             }
         }
     }
 
     pub fn to_model(&self, voxels: &mut [u16; bgm::CS_P3], model: &mut Model) -> usize {
-        self.fill_bgm(voxels);
+        // self.fill_bgm(voxels, 0);
+        self.fill_bgm_solid(voxels);
         let mut mesh_data = bgm::MeshData::new();
         bgm::mesh(voxels, &mut mesh_data, BTreeSet::default());
-
-        let decode_quad = |quad: u64| -> (VoxelIdx, [i32; 2]) {
-            let x = (quad & 0b111111) as i32;
-            let y = ((quad >> 6) & 0b111111) as i32;
-            let z = ((quad >> 12) & 0b111111) as i32;
-            let w = ((quad >> 18) & 0b111111) as i32;
-            let h = ((quad >> 24) & 0b111111) as i32;
-            (VoxelIdx::from([x, y, z]), [w as i32, h as i32])
-        };
 
         // Up, Down, Right, Left, Front, Back, in this order. (assuming right handed Y up)
 
