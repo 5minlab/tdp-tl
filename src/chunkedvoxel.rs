@@ -88,8 +88,10 @@ impl Voxel for ChunkedVoxel {
             let base = chunk_base(idx);
 
             let mut model = Model::default();
-            count += cell.to_model(base, &mut voxels, &mut model);
+            model.offset = base;
+            count += cell.to_model(&mut voxels, &mut model);
             cell.dirty.set(false);
+
             let model = Rc::new(model);
             self.models.insert(idx, model.clone());
             models.push(model);

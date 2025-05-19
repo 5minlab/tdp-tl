@@ -55,12 +55,7 @@ impl BGMCell {
         }
     }
 
-    pub fn to_model(
-        &self,
-        base: VoxelIdx,
-        voxels: &mut [u16; bgm::CS_P3],
-        model: &mut Model,
-    ) -> usize {
+    pub fn to_model(&self, voxels: &mut [u16; bgm::CS_P3], model: &mut Model) -> usize {
         self.fill_bgm(voxels);
         let mut mesh_data = bgm::MeshData::new();
         bgm::mesh(voxels, &mut mesh_data, BTreeSet::default());
@@ -71,12 +66,7 @@ impl BGMCell {
             let z = ((quad >> 12) & 0b111111) as i32;
             let w = ((quad >> 18) & 0b111111) as i32;
             let h = ((quad >> 24) & 0b111111) as i32;
-
-            let ox = base.idx[0] + x;
-            let oy = base.idx[1] + y;
-            let oz = base.idx[2] + z;
-
-            (VoxelIdx::from([ox, oy, oz]), [w as i32, h as i32])
+            (VoxelIdx::from([x, y, z]), [w as i32, h as i32])
         };
 
         // Up, Down, Right, Left, Front, Back, in this order. (assuming right handed Y up)

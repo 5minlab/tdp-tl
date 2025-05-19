@@ -195,7 +195,6 @@ const UNIT: f32 = LAYER_HEIGHT / 5.0;
 // tunables
 const INJECT_OFFSET_Z: f32 = LAYER_HEIGHT / 5.0;
 
-
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
     fn bounding_box(&self) -> &BoundingBox;
@@ -206,6 +205,8 @@ pub trait Voxel: Default {
 
 #[derive(Default)]
 pub struct Model {
+    offset: VoxelIdx,
+
     vertices: indexmap::IndexSet<VoxelIdx>,
     faces: Vec<[usize; 4]>,
 
@@ -321,7 +322,10 @@ fn model_serialize_gltf(
                 None,
                 Some(material),
             );
-            let node = builder.add_node(Some(name.clone()), Some(mesh), None, None, None);
+
+            let offset = model.offset;
+            let offset = [offset[0] as f32, offset[2] as f32, -offset[1] as f32];
+            let node = builder.add_node(Some(name.clone()), Some(mesh), Some(offset), None, None);
             nodes.push(node);
         }
 
