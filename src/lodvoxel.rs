@@ -1,7 +1,8 @@
-use super::{BoundingBox, Model, Voxel, VoxelIdx};
+use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
 
 use super::cell::*;
 use super::chunkedvoxel::ChunkedBase;
+use anyhow::Result;
 use std::rc::Rc;
 
 use transvoxel::voxel_source::*;
@@ -19,6 +20,34 @@ impl<'a> DataField<f32, f32> for &'a LodVoxel {
         } else {
             -1.0
         }
+    }
+}
+
+impl LodVoxel {
+    fn build(&self, idx: u64) -> transvoxel::generic_mesh::Mesh<f32> {
+        use transvoxel::prelude::*;
+
+        let base = chunk_base(idx);
+
+        let threshold = 0.0f32;
+        let subdivisions = 16;
+
+        let block = Block::from(
+            [base.idx[0] as f32, base.idx[1] as f32, base.idx[2] as f32],
+            CELL_SIZE as f32,
+            subdivisions,
+        );
+        let source = WorldMappingVoxelSource {
+            field: &*self,
+            block: &block,
+        };
+        let transition_sides = transition_sides::no_side();
+
+        // Finally, you can run the mesh extraction:
+        use transvoxel::generic_mesh::GenericMeshBuilder;
+        let builder = GenericMeshBuilder::new();
+        let builder = extract(source, &block, threshold, transition_sides, builder);
+        builder.build()
     }
 }
 
@@ -43,33 +72,10 @@ impl Voxel for LodVoxel {
         let mut models = vec![];
 
         for (&idx, _cell) in self.base.chunks.iter() {
-            use transvoxel::prelude::*;
-
-            let base = chunk_base(idx);
-            let mut model = Model::default();
-
-            let threshold = 0.0f32;
-
-            let subdivisions = 16;
-            let block = Block::from(
-                [base.idx[0] as f32, base.idx[1] as f32, base.idx[2] as f32],
-                CELL_SIZE as f32,
-                subdivisions,
-            );
-            let source = WorldMappingVoxelSource {
-                field: &*self,
-                block: &block,
-            };
-            let transition_sides = transition_sides::no_side();
-
-            // Finally, you can run the mesh extraction:
-            use transvoxel::generic_mesh::GenericMeshBuilder;
-            let builder = GenericMeshBuilder::new();
-            let builder = extract(source, &block, threshold, transition_sides, builder);
-            let mesh = builder.build();
-
+            let mesh = self.build(idx);
             assert_eq!(mesh.positions.len(), mesh.normals.len());
 
+            let mut model = Model::default();
             let vertex_count = mesh.positions.len() / 3;
             for i in 0..vertex_count {
                 let x = mesh.positions[i * 3];
@@ -105,5 +111,38 @@ impl Voxel for LodVoxel {
         }
 
         models
+    }
+
+    fn debug(&self, filename: &str) -> Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        let writer = std::fs::File::create(filename)?;
+        let mut writer = std::io::BufWriter::new(writer);
+
+        // type
+        writer.write_u32::<LittleEndian>(1)?;
+        writer.write_f32::<LittleEndian>(UNIT)?;
+
+        writer.write_u32::<LittleEndian>(self.base.chunks.len() as u32)?;
+        for (&idx, _cell) in self.base.chunks.iter() {
+            let mesh = self.build(idx);
+
+            writer.write_u32::<LittleEndian>(mesh.positions.len() as u32)?;
+            for i in 0..mesh.positions.len() {
+                writer.write_f32::<LittleEndian>(mesh.positions[i])?;
+            }
+
+            writer.write_u32::<LittleEndian>(mesh.normals.len() as u32)?;
+            for i in 0..mesh.normals.len() {
+                writer.write_f32::<LittleEndian>(mesh.normals[i])?;
+            }
+
+            writer.write_u32::<LittleEndian>(mesh.triangle_indices.len() as u32)?;
+            for i in 0..mesh.triangle_indices.len() {
+                writer.write_u32::<LittleEndian>(mesh.triangle_indices[i] as u32)?;
+            }
+        }
+
+        Ok(())
     }
 }

@@ -116,6 +116,8 @@ impl Voxel for ChunkedVoxel {
         let mut writer = std::io::BufWriter::new(writer);
         let mut voxels = [0; bgm::CS_P3];
 
+        // type
+        writer.write_u32::<LittleEndian>(2)?;
         writer.write_f32::<LittleEndian>(UNIT)?;
 
         writer.write_u32::<LittleEndian>(self.base.chunks.len() as u32)?;
