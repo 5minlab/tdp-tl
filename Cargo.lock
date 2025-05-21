@@ -639,7 +639,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nanovdb-sys"
+name = "nanovdb"
 version = "0.1.0"
 dependencies = [
  "bindgen",
@@ -1050,7 +1050,7 @@ dependencies = [
  "log",
  "mesh-tools",
  "nalgebra",
- "nanovdb-sys",
+ "nanovdb",
  "nom-gcode",
  "ordslice",
  "rangemap",

@@ -1,7 +1,7 @@
 use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
 
 use anyhow::Result;
-use nanovdb_sys::*;
+use nanovdb::*;
 use std::rc::Rc;
 
 use transvoxel::voxel_source::*;

@@ -1,6 +1,6 @@
 # Cargo.toml
 [package]
-name = "nanovdb-sys"
+name = "nanovdb"
 version = "0.1.0"
 links = "nanovdb_ffi"   # ties into the build script’s println!("cargo:rustc-link-lib")
 
