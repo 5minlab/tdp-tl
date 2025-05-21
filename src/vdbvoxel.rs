@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use transvoxel::voxel_source::*;
 
-const LOD_LEVEL: i32 = 2;
+// const LOD_LEVEL: i32 = 2;
 
 #[derive(Default)]
 pub struct VDBVoxel {
