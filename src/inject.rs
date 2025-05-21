@@ -6,20 +6,15 @@ pub fn line_cells(pos0: VoxelIdx, pos1: VoxelIdx, cells: &mut Vec<VoxelIdx>) {
     let dy = (pos1[1] - pos0[1]) as f32;
     let dz = (pos1[2] - pos0[2]) as f32;
 
-    let mut x = pos0[0] as f32;
-    let mut y = pos0[1] as f32;
-    let mut z = pos0[2] as f32;
+    let steps = ((dx * dx + dy * dy + dz * dz).sqrt() * 2.0) as usize;
 
     let mut cur = pos0;
     cells.push(cur);
-    loop {
-        x += dx * 0.2;
-        y += dy * 0.2;
-        z += dz * 0.2;
+    for i in 0..steps {
+        let x = pos0[0] as f32 + dx * i as f32 / steps as f32;
+        let y = pos0[1] as f32 + dy * i as f32 / steps as f32;
+        let z = pos0[2] as f32 + dz * i as f32 / steps as f32;
         let next = VoxelIdx::new([x, y, z].map(|v| v.round() as i32));
-        if next == pos1 {
-            break;
-        }
         if next == cur {
             continue;
         }
