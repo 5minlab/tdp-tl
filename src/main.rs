@@ -23,6 +23,8 @@ mod isovoxel;
 use isovoxel::IsoVoxel;
 mod fsnvoxel;
 use fsnvoxel::FSNVoxel;
+mod vdbvoxel;
+use vdbvoxel::VDBVoxel;
 
 mod inject;
 use inject::*;
@@ -139,6 +141,10 @@ struct SubCommandGcodeLayers {
     /// fsn
     #[argh(switch)]
     fsn: bool,
+
+    /// fsn
+    #[argh(switch)]
+    vdb: bool,
 
     /// glb
     #[argh(switch)]
@@ -894,6 +900,8 @@ fn main() -> Result<()> {
                 generate_gcode::<IsoVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.fsn {
                 generate_gcode::<FSNVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+            } else if opt.vdb {
+                generate_gcode::<VDBVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }

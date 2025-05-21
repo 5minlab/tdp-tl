@@ -10,6 +10,7 @@ ahash = "0.8.12"
 anyhow = "1.0.98"
 argh = "0.1.13"
 binary-greedy-meshing = "0.3.6"
+byteorder = "1.5.0"
 env_logger = "0.11.8"
 fast-surface-nets = "0.2.1"
 indexmap = "2.9.0"
@@ -22,8 +23,9 @@ ordslice = "0.3.0"
 rangemap = "1.5.1"
 rayon = "1.10.0"
 simple-stopwatch = "0"
-svo-rs = { path = "./svo-rs" }
 transvoxel = "1.2.0"
+svo-rs = { path = "./svo-rs" }
+nanovdb-sys = { path = "./nanovdb-sys" }
 
 [profile.release]
 debug = true

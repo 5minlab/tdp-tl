@@ -1,0 +1,12 @@
+# Cargo.toml
+[package]
+name = "nanovdb-sys"
+version = "0.1.0"
+links = "nanovdb_ffi"   # ties into the build script’s println!("cargo:rustc-link-lib")
+
+[build-dependencies]
+cc      = "1"
+bindgen = "0.71"    # or latest
+
+[dependencies]
+libc = "0.2"        # generated bindings use libc types
