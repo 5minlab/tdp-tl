@@ -20,7 +20,7 @@ impl std::ops::Drop for BuildGrid {
     }
 }
 
-type ValueType = u16;
+type ValueType = u8;
 pub const LEAF_DIM: usize = 8;
 pub const LEAF_SIZE: usize = LEAF_DIM * LEAF_DIM * LEAF_DIM;
 pub const NODE1_DIM: usize = 128;
@@ -59,10 +59,12 @@ impl BuildGrid {
         unsafe { sys::iter2_init(self.ptr) }
     }
 
-    pub fn iter2_get0(&self, idx: usize, coord: &mut [i32; 3]) {
+    pub fn iter2_get0(&self, idx: usize) -> [i32; 3] {
+        let mut coord = [0i32; 3];
         unsafe {
             let coord_ptr = coord.as_mut_ptr();
-            sys::iter2_get0(idx, coord_ptr)
+            sys::iter2_get0(idx, coord_ptr);
         }
+        coord
     }
 }

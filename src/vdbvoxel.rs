@@ -7,47 +7,60 @@ use std::rc::Rc;
 use transvoxel::voxel_source::*;
 
 const LOD_LEVEL: i32 = 2;
-const LOD_MAX: i32 = (1 << LOD_LEVEL) * (1 << LOD_LEVEL) * (1 << LOD_LEVEL);
 
 #[derive(Default)]
 pub struct VDBVoxel {
     grid: BuildGrid,
-    grid2: BuildGrid,
+    // grid2: BuildGrid,
 
     bb: BoundingBox,
 }
 
-pub struct Leaf<'a> {
+pub struct MeshConfig<'a> {
     grid: &'a BuildGrid,
-    coord: [i32; 3],
+    scaleshift: i32,
 }
 
-impl<'a> Leaf<'a> {
+impl<'a> MeshConfig<'a> {
     fn get(&self, x: f32, y: f32, z: f32) -> f32 {
-        let x = x as i32 + self.coord[0];
-        let y = y as i32 + self.coord[1];
-        let z = z as i32 + self.coord[2];
+        let x = (x as i32) >> self.scaleshift;
+        let y = (y as i32) >> self.scaleshift;
+        let z = (z as i32) >> self.scaleshift;
         self.grid.get(x, y, z) as f32
     }
 }
 
-impl<'a> DataField<f32, f32> for &'a Leaf<'a> {
+impl<'a> DataField<f32, f32> for &'a MeshConfig<'a> {
     fn get_data(&mut self, x: f32, y: f32, z: f32) -> f32 {
         self.get(x, y, z)
     }
 }
 
-fn build_mesh<'a>(grid: &'a BuildGrid, idx: usize) -> (VoxelIdx, transvoxel::generic_mesh::Mesh<f32>) {
-    let mut coord = [0; 3];
-    grid.iter2_get0(idx, &mut coord);
-    let base = VoxelIdx::new(coord);
-    let leaf = Leaf { grid: &grid, coord };
-
+fn build_mesh<'a>(
+    grid: &'a BuildGrid,
+    base: VoxelIdx,
+    size: usize,
+    scaleshift: i32,
+) -> transvoxel::generic_mesh::Mesh<f32> {
+    /*
+    transvoxel::generic_mesh::Mesh {
+        positions: vec![],
+        normals: vec![],
+        triangle_indices: vec![],
+    }
+    */
     use transvoxel::prelude::*;
+    let threshold = (1 << (size * 3)) as f32 / 2.0;
+    let subdivisions = size;
 
-    let threshold = LOD_MAX as f32 / 2.0;
-    let subdivisions = 128;
-    let block = Block::from([0.0, 0.0, 0.0], NODE1_DIM as f32, subdivisions);
+    let base = base.shift_up(scaleshift);
+    let size = (size << scaleshift) as f32;
+
+    let leaf = MeshConfig {
+        grid: &grid,
+        scaleshift,
+    };
+    let block = Block::from(base.f32(), size as f32, subdivisions);
     let source = WorldMappingVoxelSource {
         field: &leaf,
         block: &block,
@@ -58,7 +71,7 @@ fn build_mesh<'a>(grid: &'a BuildGrid, idx: usize) -> (VoxelIdx, transvoxel::gen
     use transvoxel::generic_mesh::GenericMeshBuilder;
     let builder = GenericMeshBuilder::new();
     let builder = extract(source, &block, threshold, transition_sides, builder);
-    (base, builder.build())
+    builder.build()
 }
 
 impl Voxel for VDBVoxel {
@@ -81,28 +94,29 @@ impl Voxel for VDBVoxel {
             return false;
         }
         self.grid.set(coord[0], coord[1], coord[2], 1);
-        self.grid2.add(
-            coord[0].div_euclid(1 << LOD_LEVEL),
-            coord[1].div_euclid(1 << LOD_LEVEL),
-            coord[2].div_euclid(1 << LOD_LEVEL),
-            1,
-        );
+
+        /*
+        let coord2 = coord.shift_down(LOD_LEVEL);
+        self.grid2.add(coord2[0], coord2[1], coord2[2], 1);
+        */
         true
     }
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
 
-        let count = self.grid2.iter2_init();
+        let grid = &self.grid;
+        let scaleshift = 0;
+
+        let count = grid.iter2_init();
         for idx in 0..count {
-            let (base, mesh) = build_mesh(&self.grid2, idx);
+            let base = VoxelIdx {
+                idx: grid.iter2_get0(idx),
+            };
+            let mesh = build_mesh(grid, base, NODE1_DIM, scaleshift);
             if mesh.positions.len() == 0 {
                 continue;
             }
-            let bx = base[0] as f32;
-            let by = base[1] as f32;
-            let bz = base[2] as f32;
-            let scale = (1 << LOD_LEVEL) as f32;
 
             assert_eq!(mesh.positions.len(), mesh.normals.len());
             // eprintln!("base: {:?}, positions: {}, triangles: {}", base, mesh.positions.len(), mesh.triangle_indices.len());
@@ -110,9 +124,9 @@ impl Voxel for VDBVoxel {
             let mut model = Model::default();
             let vertex_count = mesh.positions.len() / 3;
             for i in 0..vertex_count {
-                let x = (mesh.positions[i * 3] + bx) * scale;
-                let y = (mesh.positions[i * 3 + 1] + by) * scale;
-                let z = (mesh.positions[i * 3 + 2] + bz) * scale;
+                let x = mesh.positions[i * 3];
+                let y = mesh.positions[i * 3 + 1];
+                let z = mesh.positions[i * 3 + 2];
                 model.raw_vertices.push([x, y, z]);
 
                 let mut x = mesh.normals[i * 3];
@@ -148,6 +162,8 @@ impl Voxel for VDBVoxel {
     fn debug(&self, filename: &str) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
+        let grid = &self.grid;
+        let scaleshift = 0;
         let writer = std::fs::File::create(filename)?;
         let mut writer = std::io::BufWriter::new(writer);
 
@@ -155,24 +171,22 @@ impl Voxel for VDBVoxel {
         writer.write_u32::<LittleEndian>(1)?;
         writer.write_f32::<LittleEndian>(UNIT)?;
 
-        let count = self.grid2.iter2_init();
+        let count = grid.iter2_init();
         writer.write_u32::<LittleEndian>(count as u32)?;
         for idx in 0..count {
-            let (base, mesh) = build_mesh(&self.grid2, idx);
+            let base = VoxelIdx {
+                idx: grid.iter2_get0(idx),
+            };
+            let mesh = build_mesh(grid, base, NODE1_DIM, scaleshift);
             if mesh.positions.len() == 0 {
                 continue;
             }
 
-            let bx = base[0] as f32;
-            let by = base[1] as f32;
-            let bz = base[2] as f32;
-            let scale = (1 << LOD_LEVEL) as f32;
-
             writer.write_u32::<LittleEndian>(mesh.positions.len() as u32)?;
             for i in 0..(mesh.positions.len() / 3) {
-                let x = (mesh.positions[i * 3] + bx) * scale;
-                let y = (mesh.positions[i * 3 + 1] + by) * scale;
-                let z = (mesh.positions[i * 3 + 2] + bz) * scale;
+                let x = mesh.positions[i * 3];
+                let y = mesh.positions[i * 3 + 1];
+                let z = mesh.positions[i * 3 + 2];
                 writer.write_f32::<LittleEndian>(x)?;
                 writer.write_f32::<LittleEndian>(y)?;
                 writer.write_f32::<LittleEndian>(z)?;

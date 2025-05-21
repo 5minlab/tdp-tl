@@ -8,46 +8,49 @@
 using namespace nanovdb;
 using namespace nanovdb::tools;
 
-std::vector<build::LeafNode<uint16_t> *> leafs;
+typedef uint8_t ValueType;
+
+std::vector<build::LeafNode<ValueType> *> leafs;
 std::vector<nanovdb::Coord> coords;
 
 extern "C" {
 intptr_t grid_new() {
-  auto buildGrid = new build::Grid<uint16_t>(0);
+  auto buildGrid = new build::Grid<ValueType>(0);
   return (intptr_t)buildGrid;
 }
 
 void grid_delete(intptr_t grid) {
-  build::Grid<uint16_t> *buildGrid = (build::Grid<uint16_t> *)grid;
+  build::Grid<ValueType> *buildGrid = (build::Grid<ValueType> *)grid;
   delete buildGrid;
 }
 
-uint16_t get_value(intptr_t grid, int32_t x, int32_t y, int32_t z) {
-  build::Grid<uint16_t> *buildGrid = (build::Grid<uint16_t> *)grid;
+ValueType get_value(intptr_t grid, int32_t x, int32_t y, int32_t z) {
+  build::Grid<ValueType> *buildGrid = (build::Grid<ValueType> *)grid;
   auto coord = nanovdb::Coord(x, y, z);
   return buildGrid->tree().getValue(coord);
 }
 
-uint16_t add_value(intptr_t grid, int32_t x, int32_t y, int32_t z,
-                  uint16_t value) {
-  build::Grid<uint16_t> *buildGrid = (build::Grid<uint16_t> *)grid;
+ValueType add_value(intptr_t grid, int32_t x, int32_t y, int32_t z,
+                    ValueType value) {
+  build::Grid<ValueType> *buildGrid = (build::Grid<ValueType> *)grid;
   auto coord = nanovdb::Coord(x, y, z);
   value += buildGrid->tree().getValue(coord);
   buildGrid->tree().setValue(coord, value);
   return value;
 }
 
-void set_value(intptr_t grid, int32_t x, int32_t y, int32_t z, uint16_t value) {
-  build::Grid<uint16_t> *buildGrid = (build::Grid<uint16_t> *)grid;
+void set_value(intptr_t grid, int32_t x, int32_t y, int32_t z,
+               ValueType value) {
+  build::Grid<ValueType> *buildGrid = (build::Grid<ValueType> *)grid;
   auto coord = nanovdb::Coord(x, y, z);
   buildGrid->tree().setValue(coord, value);
 }
 
 size_t iter_init(intptr_t grid) {
-  auto buildGrid = (build::Grid<uint16_t> *)grid;
+  auto buildGrid = (build::Grid<ValueType> *)grid;
   leafs.clear();
 
-  using Node0 = build::LeafNode<uint16_t>;
+  using Node0 = build::LeafNode<ValueType>;
   using Node1 = build::InternalNode<Node0>;
   using Node2 = build::InternalNode<Node1>;
 
@@ -75,7 +78,7 @@ void iter_get0(size_t idx, int32_t *coord) {
   coord[2] = origin[2];
 }
 
-void iter_get(size_t idx, int32_t *coord, uint16_t *buf) {
+void iter_get(size_t idx, int32_t *coord, ValueType *buf) {
   auto leaf = leafs[idx];
   auto origin = leaf->mOrigin;
   coord[0] = origin[0];
@@ -85,10 +88,10 @@ void iter_get(size_t idx, int32_t *coord, uint16_t *buf) {
 }
 
 size_t iter2_init(intptr_t grid) {
-  auto buildGrid = (build::Grid<uint16_t> *)grid;
+  auto buildGrid = (build::Grid<ValueType> *)grid;
   coords.clear();
 
-  using Node0 = build::LeafNode<uint16_t>;
+  using Node0 = build::LeafNode<ValueType>;
   using Node1 = build::InternalNode<Node0>;
   using Node2 = build::InternalNode<Node1>;
 
