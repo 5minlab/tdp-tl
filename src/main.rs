@@ -619,6 +619,39 @@ fn generate_gcode<V: Voxel + Default>(
     }
 
     let mut last_sw = Stopwatch::start_new();
+
+    let mut export = |mv: &mut V, postfix: &str| -> Result<()> {
+        let last_dt = last_sw.ms();
+        let sw = Stopwatch::start_new();
+        let model = mv.to_model();
+        info!("to_model: took={:.2}ms/{:.2}ms", last_dt, sw.ms());
+
+        let sw = Stopwatch::start_new();
+
+        let out_filename = if out_glb {
+            let filename = format!("{}/gcode_{}.glb", out_filename, postfix);
+            model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
+
+            let filename1 = format!("{}/gcode_{}.bin", out_filename, postfix);
+            mv.debug(&filename1)?;
+            filename
+        } else {
+            let filename = format!("{}/gcode_{}.obj", out_filename, postfix);
+            // let model = mv.to_model();
+            // model_serialize(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
+            filename
+        };
+        // model.serialize_raw(&out_filename)?;
+        info!(
+            "Model::serialize: took={:.2}ms, filename={}",
+            sw.ms(),
+            out_filename
+        );
+
+        last_sw = Stopwatch::start_new();
+        Ok(())
+    };
+
     for item in parsed {
         match item {
             (_, Some(Comment(comment))) => {
@@ -635,31 +668,9 @@ fn generate_gcode<V: Voxel + Default>(
                     break;
                 }
 
-                if out_layers {
-                    let last_dt = last_sw.ms();
-                    let sw = Stopwatch::start_new();
-                    let model = mv.to_model();
-                    info!("to_model: took={:.2}ms/{:.2}ms", last_dt, sw.ms());
-
-                    let sw = Stopwatch::start_new();
-
-                    let out_filename = if out_glb {
-                        let out_filename = format!("{}/gcode_{:03}.glb", out_filename, layer_idx);
-                        model_serialize_gltf(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
-                        out_filename
-                    } else {
-                        let out_filename = format!("{}/gcode_{:03}.obj", out_filename, layer_idx);
-                        model_serialize(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
-                        out_filename
-                    };
-                    // model.serialize_raw(&out_filename)?;
-                    info!(
-                        "Model::serialize: took={:.2}ms, filename={}",
-                        sw.ms(),
-                        out_filename
-                    );
-
-                    last_sw = Stopwatch::start_new();
+                if out_layers && layer_idx % 10 == 0 {
+                    let postfix = format!("{:03}", layer_idx);
+                    export(&mut mv, &postfix)?;
                 }
             }
             (_, Some(GCode(code))) => {
@@ -825,19 +836,7 @@ fn generate_gcode<V: Voxel + Default>(
 
     info!("bounding box: {:?}", mv.bounding_box());
 
-    if !out_layers {
-        let sw = Stopwatch::start_new();
-        let model = mv.to_model();
-        info!("to_model: took={:.2}ms", sw.ms());
-
-        let sw = Stopwatch::start_new();
-        model_serialize(&model, &out_filename, [-90f32, -90f32, 0f32], UNIT)?;
-        info!(
-            "Model::Serialize: took={:.2}ms, filename={}",
-            sw.ms(),
-            out_filename
-        );
-    }
+    export(&mut mv, "full")?;
 
     Ok(())
 }
