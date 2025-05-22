@@ -3,7 +3,6 @@ use argh::FromArgs;
 use log::*;
 use nalgebra::Point3;
 use nalgebra::Vector3;
-use nom_gcode::{GCodeLine::*, Mnemonic};
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
 use std::rc::Rc;
@@ -30,6 +29,8 @@ use vdbvoxel::VDBVoxel;
 
 mod extrude;
 use extrude::*;
+mod gcode;
+use gcode::*;
 
 #[derive(FromArgs)]
 /// toplevel
@@ -712,6 +713,9 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         let diff = dst - self.pos;
         // in millimeters
         let len = diff.magnitude();
+        if len < 0.01 {
+            return;
+        }
         let dir = diff.normalize();
 
         let seconds = len / (self.f / 60.0);
@@ -723,8 +727,8 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             return;
         }
 
-        // no inter-layer extrudeion
-        assert!(dir.z <= 0.0);
+        // no inter-layer extrusion
+        assert!(dir.z <= 0.0, "delta_e={}, dir={:?}", delta_e, dir);
 
         let z = intpos(dst[2]);
         let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
@@ -754,7 +758,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         // TODO: accurate volume calculation
         let total_blocks = filament_volume / BLOCK_VOLUME;
-        let mut blocks = total_blocks as usize;
+        let blocks = total_blocks as usize;
 
         debug!(
             "{:?} -> {:?}, len={}, e={:?}, blocks={}",
@@ -765,8 +769,9 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             total_blocks
         );
 
-        let mut cursor = self.pos;
+        let cursor = self.pos;
         // 1800mm/min, 30mm/s, 0.5mm/frame
+        /*
         let step_size = self.f / FPS as f32 / 60.0;
 
         let blocks_per_step = (total_blocks * step_size / len) as usize;
@@ -787,6 +792,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             self.frames += 1;
             self.dirtycount += self.mv.debug1();
         }
+        */
 
         // last segment
         if blocks > 0 {
@@ -802,82 +808,6 @@ impl<V: Voxel + Default> ExtrudeState<V> {
     }
 }
 
-enum GCode1 {
-    Layer(usize),
-    Coord(GCode1Coord),
-}
-
-#[derive(Default, Clone, Copy)]
-struct GCode1Coord {
-    major: u32,
-    x: Option<f32>,
-    y: Option<f32>,
-    z: Option<f32>,
-    e: Option<f32>,
-    f: Option<f32>,
-}
-
-impl GCode1Coord {
-    fn from_argument<'a>(code: nom_gcode::GCode<'a>) -> Self {
-        let mut out = Self::default();
-        out.major = code.major;
-        for (letter, value) in code.arguments() {
-            let letter = *letter;
-            let v = match value {
-                Some(v) => *v,
-                None => todo!(),
-            };
-
-            if letter == 'X' {
-                out.x = Some(v);
-            }
-            if letter == 'Y' {
-                out.y = Some(v);
-            }
-            if letter == 'Z' {
-                out.z = Some(v);
-            }
-            if letter == 'E' {
-                out.e = Some(v);
-            }
-            if letter == 'F' {
-                out.f = Some(v);
-            }
-        }
-        out
-    }
-}
-
-fn parse_gcode(filename: &str) -> Result<Vec<GCode1>> {
-    let gcode = std::fs::read_to_string(filename)?;
-    let mut out = Vec::new();
-    for line in gcode.lines() {
-        let parsed = nom_gcode::parse_gcode(&line)?;
-        match parsed {
-            (_, Some(Comment(comment))) => {
-                let prefix = "LAYER:";
-                if !comment.0.starts_with(prefix) {
-                    continue;
-                }
-                let layer_idx = comment.0[prefix.len()..].parse::<usize>()?;
-                out.push(GCode1::Layer(layer_idx));
-            }
-            (_, Some(GCode(code))) => {
-                if code.mnemonic != Mnemonic::General {
-                    continue;
-                }
-
-                if [0, 1, 92].contains(&code.major) {
-                    out.push(GCode1::Coord(GCode1Coord::from_argument(code)));
-                }
-            }
-            (_, _) => (),
-        }
-    }
-
-    Ok(out)
-}
-
 fn generate_gcode<V: Voxel + Default>(
     filename: &str,
     out_filename: &str,
@@ -890,28 +820,33 @@ fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    for item in parsed {
-        match item {
-            GCode1::Layer(layer_idx) => {
-                if layer_idx == 0 {
-                    continue;
-                }
+    if false {
+        let mut runner = ExtrudeRunner::<V>::new(parsed);
+        while runner.step(out_filename) {}
+        state = runner.state;
+    } else {
+        for item in parsed {
+            match item {
+                GCode1::Layer(layer_idx) => {
+                    if layer_idx == 0 {
+                        continue;
+                    }
 
-                if layer_idx == layer {
-                    break;
-                }
+                    if layer_idx == layer {
+                        break;
+                    }
 
-                if out_layers && layer_idx % 10 == 0 {
-                    let postfix = format!("{:03}", layer_idx);
-                    state.export(out_filename, &postfix, out_glb)?;
+                    if out_layers && layer_idx % 10 == 0 {
+                        let postfix = format!("{:03}", layer_idx);
+                        state.export(out_filename, &postfix, out_glb)?;
+                    }
                 }
-            }
-            GCode1::Coord(coord) => {
-                state.handle_gcode(coord);
+                GCode1::Coord(coord) => {
+                    state.handle_gcode(coord);
+                }
             }
         }
     }
-
     state.export(out_filename, "full", out_glb)?;
 
     let blocks = state.mv.bounding_box().count;
@@ -926,6 +861,93 @@ fn generate_gcode<V: Voxel + Default>(
     );
 
     Ok(())
+}
+
+struct ExtrudeRunner<V: Voxel> {
+    pub state: ExtrudeState<V>,
+
+    cur: Option<GCode1Coord>,
+    pendings: Vec<GCode1>,
+}
+
+impl<V: Voxel + Default> ExtrudeRunner<V> {
+    fn new(mut pendings: Vec<GCode1>) -> Self {
+        pendings.reverse();
+
+        Self {
+            state: ExtrudeState::default(),
+            cur: None,
+            pendings,
+        }
+    }
+
+    fn step(&mut self, out_filename: &str) -> bool {
+        let mut cur = match self.cur.take() {
+            None => match self.pendings.pop() {
+                Some(GCode1::Coord(cur)) => cur,
+                Some(GCode1::Layer(layer_idx)) => {
+                    info!("layer {}", layer_idx);
+                    if layer_idx > 0 && layer_idx % 10 == 0 {
+                        let postfix = format!("{:03}", layer_idx);
+                        self.state.export(out_filename, &postfix, true).unwrap();
+                    }
+                    return true;
+                }
+                None => return false,
+            },
+            Some(cur) => cur,
+        };
+
+        if !cur.chunked {
+            let prev = GCode1Coord {
+                major: cur.major,
+                x: Some(self.state.pos[0]),
+                y: Some(self.state.pos[1]),
+                z: Some(self.state.pos[2]),
+                e: Some(self.state.e),
+                f: Some(self.state.f),
+                chunked: true,
+            };
+            let mut next = prev.apply(&cur);
+
+            let dx = next.x.unwrap_or(0.0) - prev.x.unwrap_or(0.0);
+            let dy = next.y.unwrap_or(0.0) - prev.y.unwrap_or(0.0);
+            let dz = next.z.unwrap_or(0.0) - prev.z.unwrap_or(0.0);
+            let de = next.e.unwrap_or(0.0) - prev.e.unwrap_or(0.0);
+
+            let diff = Vector3::new(dx, dy, dz);
+
+            let len = diff.magnitude();
+            if len < std::f32::EPSILON {
+                cur = next;
+            } else {
+                let step_size = next.f.unwrap_or(1800.0) / FPS as f32 / 60.0;
+
+                self.pendings.push(GCode1::Coord(next));
+                let mut step = len;
+                while step >= step_size {
+                    step -= step_size;
+                    let dx = dx * step / len;
+                    let dy = dy * step / len;
+                    let dz = dz * step / len;
+                    let de = de * step / len;
+
+                    next.x = Some(prev.x.unwrap_or(0.0) + dx);
+                    next.y = Some(prev.y.unwrap_or(0.0) + dy);
+                    next.z = Some(prev.z.unwrap_or(0.0) + dz);
+                    next.e = Some(prev.e.unwrap_or(0.0) + de);
+
+                    self.pendings.push(GCode1::Coord(next));
+                }
+                cur = prev;
+            }
+        }
+
+        assert!(cur.chunked);
+        self.state.handle_gcode(cur);
+
+        true
+    }
 }
 
 fn main() -> Result<()> {
