@@ -5,7 +5,7 @@ use super::chunkedvoxel::ChunkedBase;
 use anyhow::Result;
 use fast_surface_nets::ndshape::{ConstShape, ConstShape3u32};
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
-use std::collections::HashSet;
+use std::collections::*;
 use std::rc::Rc;
 
 // A 16^3 chunk with 1-voxel boundary padding.
@@ -17,6 +17,16 @@ pub struct FSNVoxel {
     base: ChunkedBase,
 
     dirty: HashSet<VoxelIdx>,
+    model_cache: HashMap<u64, Rc<Model>>,
+}
+
+impl FSNVoxel {
+    fn setdirty(&mut self, coord_dirty: VoxelIdx) {
+        if self.dirty.insert(coord_dirty) {
+            let coord = coord_dirty.shift_up(CELL_SIZE_BITS);
+            self.model_cache.remove(&chunk_idx(coord));
+        }
+    }
 }
 
 impl Voxel for FSNVoxel {
@@ -43,19 +53,19 @@ impl Voxel for FSNVoxel {
 
         let [xx, yy, zz] = cell_idx(coord);
         if xx == 0 {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([-1, 0, 0]));
+            self.setdirty(coord_dirty + VoxelIdx::new([-1, 0, 0]));
         } else if xx == (CELL_SIZE - 1) {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([1, 0, 0]));
+            self.setdirty(coord_dirty + VoxelIdx::new([1, 0, 0]));
         }
         if yy == 0 {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([0, -1, 0]));
+            self.setdirty(coord_dirty + VoxelIdx::new([0, -1, 0]));
         } else if yy == (CELL_SIZE - 1) {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([0, 1, 0]));
+            self.setdirty(coord_dirty + VoxelIdx::new([0, 1, 0]));
         }
         if zz == 0 {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([0, 0, -1]));
+            self.setdirty(coord_dirty + VoxelIdx::new([0, 0, -1]));
         } else if zz == (CELL_SIZE - 1) {
-            self.dirty.insert(coord_dirty + VoxelIdx::new([0, 0, 1]));
+            self.setdirty(coord_dirty + VoxelIdx::new([0, 0, 1]));
         }
 
         true
@@ -65,6 +75,11 @@ impl Voxel for FSNVoxel {
         let mut models = vec![];
 
         for (&idx, cell) in self.base.chunks.iter() {
+            if let Some(model) = self.model_cache.get(&idx) {
+                models.push(model.clone());
+                continue;
+            }
+
             let base = chunk_base(idx);
             let bx = base[0] as u32;
             let by = base[1] as u32;
@@ -158,7 +173,9 @@ impl Voxel for FSNVoxel {
                 model.raw_triangles.push([ni1, ni2, ni3]);
             }
 
-            models.push(Rc::new(model));
+            let model = Rc::new(model);
+            self.model_cache.insert(idx, model.clone());
+            models.push(model);
         }
 
         models
@@ -177,6 +194,9 @@ impl Voxel for FSNVoxel {
         let models = self.to_model();
         writer.write_u32::<LittleEndian>(models.len() as u32)?;
         for model in models {
+            let idx = chunk_idx(model.offset);
+
+            writer.write_u64::<LittleEndian>(idx)?;
             writer.write_u32::<LittleEndian>(model.raw_vertices.len() as u32 * 3)?;
             for [x, y, z] in &model.raw_vertices {
                 writer.write_f32::<LittleEndian>(*x)?;

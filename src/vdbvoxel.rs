@@ -182,6 +182,7 @@ impl Voxel for VDBVoxel {
                 continue;
             }
 
+            writer.write_u64::<LittleEndian>(idx as u64)?;
             writer.write_u32::<LittleEndian>(mesh.positions.len() as u32)?;
             for i in 0..(mesh.positions.len() / 3) {
                 let x = mesh.positions[i * 3];

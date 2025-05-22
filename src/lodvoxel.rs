@@ -127,6 +127,7 @@ impl Voxel for LodVoxel {
         for (&idx, _cell) in self.base.chunks.iter() {
             let mesh = self.build(idx);
 
+            writer.write_u64::<LittleEndian>(idx)?;
             writer.write_u32::<LittleEndian>(mesh.positions.len() as u32)?;
             for i in 0..mesh.positions.len() {
                 writer.write_f32::<LittleEndian>(mesh.positions[i])?;

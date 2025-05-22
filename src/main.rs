@@ -200,6 +200,8 @@ const Z_OFFSET_UP: i32 = 1;
 
 const NOZZLE_SIZE: f32 = 0.4f32;
 
+const FPS: usize = 30;
+
 // tunables
 const INJECT_OFFSET_Z: f32 = 0.0; //UNIT / 2.0;
 
@@ -799,9 +801,8 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         );
 
         let mut cursor = self.pos;
-        // 60fps
         // 1800mm/min, 30mm/s, 0.5mm/frame
-        let step_size = self.f / 60.0 / 60.0;
+        let step_size = self.f / FPS as f32 / 60.0;
 
         let blocks_per_step = (total_blocks * step_size / len) as usize;
         while (cursor - dst).magnitude() > step_size {
