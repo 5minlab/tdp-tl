@@ -25,8 +25,12 @@ rayon = "1.10.0"
 simple-stopwatch = "0"
 transvoxel = "1.2.0"
 svo-rs = { path = "./svo-rs" }
-nanovdb = { path = "./nanovdb" }
+nanovdb = { path = "./nanovdb", optional = true }
 meshopt = "0.4.1"
+
+# optional features
+[features]
+default = []
 
 [profile.release]
 debug = true

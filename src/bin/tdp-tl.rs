@@ -344,7 +344,8 @@ fn main() -> Result<()> {
             } else if opt.fsn {
                 generate_gcode::<FSNVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             } else if opt.vdb {
-                generate_gcode::<VDBVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                // generate_gcode::<VDBVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                Ok(())
             } else {
                 generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
             }

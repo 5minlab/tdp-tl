@@ -23,7 +23,9 @@ mod isovoxel;
 pub use isovoxel::IsoVoxel;
 mod fsnvoxel;
 pub use fsnvoxel::FSNVoxel;
+#[cfg(feature = "nanovdb")]
 mod vdbvoxel;
+#[cfg(feature = "nanovdb")]
 pub use vdbvoxel::VDBVoxel;
 
 mod extrude;
