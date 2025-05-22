@@ -2,6 +2,8 @@ use anyhow::Result;
 use argh::FromArgs;
 use log::*;
 use nalgebra::Point3;
+use nalgebra::Vector3;
+use nom_gcode::{GCodeLine::*, Mnemonic};
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
 use std::rc::Rc;
@@ -26,8 +28,8 @@ use fsnvoxel::FSNVoxel;
 mod vdbvoxel;
 use vdbvoxel::VDBVoxel;
 
-mod inject;
-use inject::*;
+mod extrude;
+use extrude::*;
 
 #[derive(FromArgs)]
 /// toplevel
@@ -41,7 +43,7 @@ struct TopLevel {
 enum SubCommandEnum {
     DemoSphereFrames(DemoSphereFrames),
     DemoSphere(DemoSphere),
-    DemoInject(DemoInject),
+    DemoExtrude(DemoExtrude),
     Gcode(SubCommandGcode),
     GcodeLayers(SubCommandGcodeLayers),
 }
@@ -81,9 +83,9 @@ struct DemoSphere {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// demo: inject
-#[argh(subcommand, name = "demo-inject")]
-struct DemoInject {
+/// demo: extrude
+#[argh(subcommand, name = "demo-extrude")]
+struct DemoExtrude {
     /// output filename
     #[argh(option)]
     out: String,
@@ -208,7 +210,7 @@ pub trait Voxel: Default {
     fn add(&mut self, coord: VoxelIdx) -> bool;
     fn to_model(&mut self) -> Vec<Rc<Model>>;
 
-    fn debug(&self, _filename: &str) -> Result<()> {
+    fn debug(&mut self, _filename: &str) -> Result<()> {
         Ok(())
     }
 }
@@ -524,22 +526,22 @@ fn generate_frames_constz<V: Voxel>(outdir: &String) -> Result<()> {
     Ok(())
 }
 
-fn generate_inject(out: &str) -> Result<()> {
+fn generate_extrude(out: &str) -> Result<()> {
     let mut mv = MonotonicVoxel::default();
 
     // unit: 0.02mm, layer thickness: 0.2mm, nozzle size: 0.4mm
     // 20mm
 
-    let inject_per_dist = 200;
+    let extrude_per_dist = 200;
     let dist_per_step = 5;
     let dist = 100;
     for step in 0..(dist / dist_per_step) {
         let p = VoxelIdx::from([step * dist_per_step, 0, 0]);
-        inject_at(
+        extrude_at(
             &mut mv,
             -5..5,
             &[p],
-            (inject_per_dist * dist_per_step) as usize,
+            (extrude_per_dist * dist_per_step) as usize,
         );
     }
 
@@ -591,45 +593,44 @@ fn generate_frames<V: Voxel>(outdir: &str, render: bool) -> Result<()> {
     Ok(())
 }
 
-fn generate_gcode<V: Voxel + Default>(
-    filename: &str,
-    out_filename: &str,
-    layer: usize,
-    out_layers: bool,
-    out_glb: bool,
-) -> Result<()> {
-    use nalgebra::Vector3;
-    use nom_gcode::{GCodeLine::*, Mnemonic};
+struct ExtrudeState<V: Voxel + Default> {
+    mv: V,
 
-    let mut mv = V::default();
+    pos: Vector3<f32>,
+    f: f32,
+    e: f32,
 
-    let gcode = std::fs::read_to_string(filename)?;
+    last_sw: Stopwatch,
+}
 
-    fn intpos(v: f32) -> i32 {
-        (v / UNIT).round() as i32
+impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
+    fn default() -> Self {
+        let last_sw = Stopwatch::start_new();
+        Self {
+            mv: V::default(),
+            pos: Vector3::new(0.0, 0.0, 0.0),
+            f: 0.0,
+            e: 0.0,
+            last_sw,
+        }
     }
+}
 
-    fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
-        [intpos(pos[0]), intpos(pos[1]), intpos(pos[2])].into()
-    }
+fn intpos(v: f32) -> i32 {
+    (v / UNIT).round() as i32
+}
 
-    let sw = Stopwatch::start_new();
+fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
+    [intpos(pos[0]), intpos(pos[1]), intpos(pos[2])].into()
+}
 
-    let mut pos = Vector3::default();
-    let mut e = 0f32;
+impl<V: Voxel + Default> ExtrudeState<V> {
+    fn export(&mut self, out_filename: &str, postfix: &str, out_glb: bool) -> Result<()> {
+        self.last_sw = Stopwatch::start_new();
+        let last_dt = self.last_sw.ms();
 
-    let mut parsed = Vec::new();
-    for line in gcode.lines() {
-        let item = nom_gcode::parse_gcode(&line)?;
-        parsed.push(item);
-    }
-
-    let mut last_sw = Stopwatch::start_new();
-
-    let mut export = |mv: &mut V, postfix: &str| -> Result<()> {
-        let last_dt = last_sw.ms();
         let sw = Stopwatch::start_new();
-        let model = mv.to_model();
+        let model = self.mv.to_model();
         info!("to_model: took={:.2}ms/{:.2}ms", last_dt, sw.ms());
 
         let sw = Stopwatch::start_new();
@@ -639,7 +640,7 @@ fn generate_gcode<V: Voxel + Default>(
             model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
 
             let filename1 = format!("{}/gcode_{}.bin", out_filename, postfix);
-            mv.debug(&filename1)?;
+            self.mv.debug(&filename1)?;
             filename
         } else {
             let filename = format!("{}/gcode_{}.obj", out_filename, postfix);
@@ -654,9 +655,186 @@ fn generate_gcode<V: Voxel + Default>(
             out_filename
         );
 
-        last_sw = Stopwatch::start_new();
+        self.last_sw = Stopwatch::start_new();
         Ok(())
-    };
+    }
+
+    fn handle_gcode<'a, 'b>(&'a mut self, code: nom_gcode::GCode<'b>) {
+        if code.mnemonic != Mnemonic::General {
+            return;
+        }
+
+        if code.major == 92 {
+            for (letter, value) in code.arguments() {
+                let letter = *letter;
+                let v = match value {
+                    Some(v) => *v,
+                    None => return,
+                };
+
+                if letter == 'E' {
+                    self.e = v;
+                } else {
+                    todo!();
+                }
+            }
+        }
+
+        if code.major == 0 {
+            for (letter, value) in code.arguments() {
+                let letter = *letter;
+                let v = match value {
+                    Some(v) => *v,
+                    None => return,
+                };
+
+                if letter == 'X' {
+                    self.pos[0] = v;
+                }
+                if letter == 'Y' {
+                    self.pos[1] = v;
+                }
+                if letter == 'Z' {
+                    self.pos[2] = v;
+                }
+                if letter == 'F' {
+                    self.f = v;
+                }
+            }
+        } else if code.major == 1 {
+            let mut dst = self.pos;
+            let mut dst_e = self.e;
+            for (letter, value) in code.arguments() {
+                let letter = *letter;
+                let v = match value {
+                    Some(v) => *v,
+                    None => return,
+                };
+
+                if letter == 'X' {
+                    dst[0] = v;
+                }
+                if letter == 'Y' {
+                    dst[1] = v;
+                }
+                if letter == 'Z' {
+                    dst[2] = v;
+                }
+                if letter == 'F' {
+                    self.f = v;
+                }
+                if letter == 'E' {
+                    dst_e = v;
+                }
+            }
+
+            if dst_e <= self.e {
+                self.pos = dst;
+                return;
+            }
+
+            let dir = (dst - self.pos).normalize();
+            let len = (dst - self.pos).magnitude();
+
+            // in centimeters
+            let delta_e = dst_e - self.e;
+            if delta_e <= 0.0 {
+                return;
+            }
+
+            // no inter-layer extrudeion
+            assert!(dir.z <= 0.0);
+
+            let z = intpos(dst[2]);
+            let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+
+            let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
+            let offsets = [
+                oz + Vector3::new(0.0, 0.0, 0.0),
+                oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+                oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+                oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+            ];
+
+            let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
+                let mut cells = vec![];
+                for offset in &offsets {
+                    let pos = to_intpos(from + offset);
+                    let next_pos = to_intpos(to + offset);
+                    line_cells(pos, next_pos, &mut cells);
+                }
+                cells
+            };
+
+            // flow rate calculation
+            // with 1.75mm filament, calculate volume, in millimeters
+            let filament_volume = delta_e * FILAMENT_CROSS_SECION;
+
+            // TODO: accurate volume calculation
+            let total_blocks = filament_volume / BLOCK_VOLUME;
+            let blocks = total_blocks as usize;
+
+            debug!(
+                "{:?} -> {:?}, len={}, e={:?}, blocks={}",
+                self.pos,
+                dst,
+                len,
+                dst_e - self.e,
+                total_blocks
+            );
+
+            let cursor = self.pos;
+            /*
+            let step_size = 1.0;
+            let blocks_per_step = (total_blocks * step_size / len) as usize;
+            while (cursor - dst).magnitude() > step_size {
+                let next = cursor + dir * step_size;
+
+                let cells = gen_cells(cursor, next);
+                let extrudeed = extrude_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
+                if extrudeed != blocks_per_step {
+                    debug!(
+                        "extrudeed != blocks_per_step, skipping: {} != {}",
+                        extrudeed, blocks_per_step
+                    );
+                }
+                cursor = next;
+                blocks -= blocks_per_step;
+            }
+            */
+
+            // last segment
+            if blocks > 0 {
+                let cells = gen_cells(cursor, dst);
+                let extrudeed = extrude_at(&mut self.mv, zrange.clone(), &cells, blocks);
+                if extrudeed != blocks {
+                    debug!("extrudeed != blocks, skipping: {} != {}", extrudeed, blocks);
+                }
+            }
+
+            self.pos = dst;
+            self.e = dst_e;
+        }
+    }
+}
+
+fn generate_gcode<V: Voxel + Default>(
+    filename: &str,
+    out_filename: &str,
+    layer: usize,
+    out_layers: bool,
+    out_glb: bool,
+) -> Result<()> {
+    let mut state = ExtrudeState::<V>::default();
+
+    let gcode = std::fs::read_to_string(filename)?;
+    let sw = Stopwatch::start_new();
+    let mut parsed = Vec::new();
+    for line in gcode.lines() {
+        let item = nom_gcode::parse_gcode(&line)?;
+        parsed.push(item);
+    }
 
     for item in parsed {
         match item {
@@ -676,173 +854,25 @@ fn generate_gcode<V: Voxel + Default>(
 
                 if out_layers && layer_idx % 10 == 0 {
                     let postfix = format!("{:03}", layer_idx);
-                    export(&mut mv, &postfix)?;
+                    state.export(out_filename, &postfix, out_glb)?;
                 }
             }
             (_, Some(GCode(code))) => {
-                if code.mnemonic != Mnemonic::General {
-                    continue;
-                }
-
-                if code.major == 92 {
-                    for (letter, value) in code.arguments() {
-                        let letter = *letter;
-                        let v = match value {
-                            Some(v) => *v,
-                            None => continue,
-                        };
-
-                        if letter == 'E' {
-                            e = v;
-                        } else {
-                            todo!();
-                        }
-                    }
-                }
-
-                if code.major == 0 {
-                    for (letter, value) in code.arguments() {
-                        let letter = *letter;
-                        let v = match value {
-                            Some(v) => *v,
-                            None => continue,
-                        };
-
-                        if letter == 'X' {
-                            pos[0] = v;
-                        }
-                        if letter == 'Y' {
-                            pos[1] = v;
-                        }
-                        if letter == 'Z' {
-                            pos[2] = v;
-                        }
-                    }
-                } else if code.major == 1 {
-                    let mut dst = pos;
-                    let mut dst_e = e;
-                    for (letter, value) in code.arguments() {
-                        let letter = *letter;
-                        let v = match value {
-                            Some(v) => *v,
-                            None => continue,
-                        };
-
-                        if letter == 'X' {
-                            dst[0] = v;
-                        }
-                        if letter == 'Y' {
-                            dst[1] = v;
-                        }
-                        if letter == 'Z' {
-                            dst[2] = v;
-                        }
-                        if letter == 'E' {
-                            dst_e = v;
-                        }
-                    }
-                    if dst_e <= e {
-                        pos = dst;
-                        continue;
-                    }
-
-                    let dir = (dst - pos).normalize();
-                    let len = (dst - pos).magnitude();
-
-                    // in centimeters
-                    let delta_e = dst_e - e;
-                    if delta_e <= 0.0 {
-                        continue;
-                    }
-
-                    // no inter-layer injection
-                    assert!(dir.z <= 0.0);
-
-                    let z = intpos(dst[2]);
-                    let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
-
-                    let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
-                    let offsets = [
-                        oz + Vector3::new(0.0, 0.0, 0.0),
-                        oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                        oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
-                        oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                        oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
-                    ];
-
-                    let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
-                        let mut cells = vec![];
-                        for offset in &offsets {
-                            let pos = to_intpos(from + offset);
-                            let next_pos = to_intpos(to + offset);
-                            line_cells(pos, next_pos, &mut cells);
-                        }
-                        cells
-                    };
-
-                    // flow rate calculation
-                    // with 1.75mm filament, calculate volume, in millimeters
-                    let filament_volume = delta_e * FILAMENT_CROSS_SECION;
-
-                    // TODO: accurate volume calculation
-                    let total_blocks = filament_volume / BLOCK_VOLUME;
-                    let mut blocks = total_blocks as usize;
-                    let step_size = 1.0;
-                    let blocks_per_step = (total_blocks * step_size / len) as usize;
-
-                    debug!(
-                        "{:?} -> {:?}, len={}, e={:?}, blocks={}",
-                        pos,
-                        dst,
-                        len,
-                        dst_e - e,
-                        total_blocks
-                    );
-
-                    let mut cursor = pos;
-                    while (cursor - dst).magnitude() > step_size {
-                        let next = cursor + dir * step_size;
-
-                        let cells = gen_cells(cursor, next);
-                        let injected = inject_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
-                        if injected != blocks_per_step {
-                            debug!(
-                                "injected != blocks_per_step, skipping: {} != {}",
-                                injected, blocks_per_step
-                            );
-                        }
-                        cursor = next;
-                        blocks -= blocks_per_step;
-                    }
-                    // last segment
-                    if blocks > 0 {
-                        let cells = gen_cells(cursor, dst);
-                        let injected = inject_at(&mut mv, zrange.clone(), &cells, blocks);
-                        if injected != blocks {
-                            debug!("injected != blocks, skipping: {} != {}", injected, blocks);
-                        }
-                    }
-
-                    pos = dst;
-                    e = dst_e;
-                }
+                state.handle_gcode(code);
             }
             (_, _) => (),
         }
     }
 
-    let blocks = mv.bounding_box().count;
+    let blocks = state.mv.bounding_box().count;
     info!(
         "voxel construction: took={:.2}ms, blocks={}/{}, bps={}",
         sw.ms(),
         blocks,
-        mv.ranges(),
+        state.mv.ranges(),
         blocks * 1000 / sw.ms() as usize
     );
-
-    info!("bounding box: {:?}", mv.bounding_box());
-
-    export(&mut mv, "full")?;
+    state.export(out_filename, "full", out_glb)?;
 
     Ok(())
 }
@@ -879,7 +909,7 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        SubCommandEnum::DemoInject(opt) => generate_inject(&opt.out),
+        SubCommandEnum::DemoExtrude(opt) => generate_extrude(&opt.out),
 
         SubCommandEnum::Gcode(opt) => {
             let layer = opt.layer.unwrap_or(std::usize::MAX);

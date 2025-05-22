@@ -24,15 +24,15 @@ pub fn line_cells(pos0: VoxelIdx, pos1: VoxelIdx, cells: &mut Vec<VoxelIdx>) {
     }
 }
 
-pub fn inject_at<V: Voxel>(v: &mut V, zrange: Range<i32>, cells: &[VoxelIdx], n: usize) -> usize {
+pub fn extrude_at<V: Voxel>(v: &mut V, zrange: Range<i32>, cells: &[VoxelIdx], n: usize) -> usize {
     if false {
-        inject_at_queue(v, zrange, cells, n)
+        extrude_at_queue(v, zrange, cells, n)
     } else {
-        inject_at_deque(v, zrange, cells, n)
+        extrude_at_deque(v, zrange, cells, n)
     }
 }
 
-pub fn inject_at_queue<V: Voxel>(
+pub fn extrude_at_queue<V: Voxel>(
     v: &mut V,
     zrange: Range<i32>,
     cells: &[VoxelIdx],
@@ -44,7 +44,7 @@ pub fn inject_at_queue<V: Voxel>(
         return 0;
     }
 
-    let mut injected = 0;
+    let mut extrudeed = 0;
 
     #[derive(Clone, Copy, Ord, PartialEq, Eq, Debug)]
     struct HeapItem {
@@ -84,8 +84,8 @@ pub fn inject_at_queue<V: Voxel>(
         }
 
         if v.add(pos) {
-            injected += 1;
-            if n == injected {
+            extrudeed += 1;
+            if n == extrudeed {
                 break;
             }
         }
@@ -121,10 +121,10 @@ pub fn inject_at_queue<V: Voxel>(
         }
     }
 
-    injected
+    extrudeed
 }
 
-pub fn inject_at_deque<V: Voxel>(
+pub fn extrude_at_deque<V: Voxel>(
     v: &mut V,
     zrange: Range<i32>,
     cells: &[VoxelIdx],
@@ -136,7 +136,7 @@ pub fn inject_at_deque<V: Voxel>(
         return 0;
     }
 
-    let mut injected = 0;
+    let mut extrudeed = 0;
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     struct HeapItem {
@@ -160,8 +160,8 @@ pub fn inject_at_deque<V: Voxel>(
 
     while let Some(HeapItem { pos, depth }) = candidates.pop_front() {
         if v.add(pos) {
-            injected += 1;
-            if n == injected {
+            extrudeed += 1;
+            if n == extrudeed {
                 break;
             }
         }
@@ -194,5 +194,5 @@ pub fn inject_at_deque<V: Voxel>(
         }
     }
 
-    injected
+    extrudeed
 }
