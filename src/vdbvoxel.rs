@@ -159,7 +159,7 @@ impl Voxel for VDBVoxel {
         models
     }
 
-    fn debug(&self, filename: &str) -> Result<()> {
+    fn debug0(&mut self, filename: &str) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
         let grid = &self.grid;

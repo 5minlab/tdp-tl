@@ -37,15 +37,14 @@ impl ChunkedBase {
             }
 
             cell.set(x, y, z);
-            true
         } else {
             let mut cell = BGMCell::default();
             self.bb.add(coord);
 
             cell.set(x, y, z);
             self.chunks.insert(idx, cell);
-            true
         }
+        true
     }
 }
 
@@ -109,7 +108,7 @@ impl Voxel for ChunkedVoxel {
         models
     }
 
-    fn debug(&self, filename: &str) -> Result<()> {
+    fn debug0(&mut self, filename: &str) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
         let writer = std::fs::File::create(filename)?;

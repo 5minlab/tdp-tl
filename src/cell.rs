@@ -3,6 +3,7 @@ use binary_greedy_meshing as bgm;
 use std::cell::Cell;
 use std::collections::BTreeSet;
 
+pub const CELL_SIZE_BITS: i32 = 5;
 pub const CELL_SIZE: usize = 32;
 
 #[derive(Debug)]

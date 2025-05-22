@@ -26,6 +26,7 @@ simple-stopwatch = "0"
 transvoxel = "1.2.0"
 svo-rs = { path = "./svo-rs" }
 nanovdb = { path = "./nanovdb" }
+meshopt = "0.4.1"
 
 [profile.release]
 debug = true

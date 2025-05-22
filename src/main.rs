@@ -183,6 +183,9 @@ impl BoundingBox {
     }
 }
 
+// unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
+const UNIT: f32 = LAYER_HEIGHT / 3.0;
+
 // block volume in cubic millimeters
 const BLOCK_VOLUME: f32 = UNIT * UNIT * UNIT;
 const FILAMENT_DIAMETER: f32 = 1.75f32;
@@ -197,11 +200,8 @@ const Z_OFFSET_UP: i32 = 1;
 
 const NOZZLE_SIZE: f32 = 0.4f32;
 
-// unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
-const UNIT: f32 = LAYER_HEIGHT / 5.0;
-
 // tunables
-const INJECT_OFFSET_Z: f32 = LAYER_HEIGHT / 5.0;
+const INJECT_OFFSET_Z: f32 = 0.0; //UNIT / 2.0;
 
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
@@ -210,8 +210,11 @@ pub trait Voxel: Default {
     fn add(&mut self, coord: VoxelIdx) -> bool;
     fn to_model(&mut self) -> Vec<Rc<Model>>;
 
-    fn debug(&mut self, _filename: &str) -> Result<()> {
+    fn debug0(&mut self, _filename: &str) -> Result<()> {
         Ok(())
+    }
+    fn debug1(&mut self) -> usize {
+        1
     }
 }
 
@@ -600,6 +603,9 @@ struct ExtrudeState<V: Voxel + Default> {
     f: f32,
     e: f32,
 
+    frames: usize,
+    dirtycount: usize,
+
     wall_seconds: f32,
     last_sw: Stopwatch,
 }
@@ -612,6 +618,9 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
             pos: Vector3::new(0.0, 0.0, 0.0),
             f: 0.0,
             e: 0.0,
+
+            frames: 0,
+            dirtycount: 0,
 
             wall_seconds: 0.0,
             last_sw,
@@ -629,12 +638,16 @@ fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
 
 impl<V: Voxel + Default> ExtrudeState<V> {
     fn export(&mut self, out_filename: &str, postfix: &str, out_glb: bool) -> Result<()> {
-        self.last_sw = Stopwatch::start_new();
         let last_dt = self.last_sw.ms();
 
         let sw = Stopwatch::start_new();
         let model = self.mv.to_model();
-        info!("to_model: took={:.2}ms/{:.2}ms, wall: {:.0}s", last_dt, sw.ms(), self.wall_seconds);
+        info!(
+            "to_model: took={:.2}ms/{:.2}ms, wall: {:.0}s",
+            last_dt,
+            sw.ms(),
+            self.wall_seconds
+        );
 
         let sw = Stopwatch::start_new();
 
@@ -643,7 +656,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
 
             let filename1 = format!("{}/gcode_{}.bin", out_filename, postfix);
-            self.mv.debug(&filename1)?;
+            self.mv.debug0(&filename1)?;
             filename
         } else {
             let filename = format!("{}/gcode_{}.obj", out_filename, postfix);
@@ -774,7 +787,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         // TODO: accurate volume calculation
         let total_blocks = filament_volume / BLOCK_VOLUME;
-        let blocks = total_blocks as usize;
+        let mut blocks = total_blocks as usize;
 
         debug!(
             "{:?} -> {:?}, len={}, e={:?}, blocks={}",
@@ -785,15 +798,17 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             total_blocks
         );
 
-        let cursor = self.pos;
-        /*
-        let step_size = 1.0;
+        let mut cursor = self.pos;
+        // 60fps
+        // 1800mm/min, 30mm/s, 0.5mm/frame
+        let step_size = self.f / 60.0 / 60.0;
+
         let blocks_per_step = (total_blocks * step_size / len) as usize;
         while (cursor - dst).magnitude() > step_size {
             let next = cursor + dir * step_size;
 
             let cells = gen_cells(cursor, next);
-            let extrudeed = extrude_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
+            let extrudeed = extrude_at(&mut self.mv, zrange.clone(), &cells, blocks_per_step);
             if extrudeed != blocks_per_step {
                 debug!(
                     "extrudeed != blocks_per_step, skipping: {} != {}",
@@ -802,8 +817,10 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             }
             cursor = next;
             blocks -= blocks_per_step;
+
+            self.frames += 1;
+            self.dirtycount += self.mv.debug1();
         }
-        */
 
         // last segment
         if blocks > 0 {
@@ -864,15 +881,18 @@ fn generate_gcode<V: Voxel + Default>(
         }
     }
 
+    state.export(out_filename, "full", out_glb)?;
+
     let blocks = state.mv.bounding_box().count;
     info!(
-        "voxel construction: took={:.2}ms, blocks={}/{}, bps={}",
+        "voxel construction: took={:.2}ms, blocks={}/{}, bps={}, frames={}, {:.1} dirty / frame",
         sw.ms(),
         blocks,
         state.mv.ranges(),
-        blocks * 1000 / sw.ms() as usize
+        blocks * 1000 / sw.ms() as usize,
+        state.frames,
+        state.dirtycount as f32 / state.frames as f32,
     );
-    state.export(out_filename, "full", out_glb)?;
 
     Ok(())
 }
