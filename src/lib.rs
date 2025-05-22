@@ -543,9 +543,9 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if true {
+    if false {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
-        while runner.step() {
+        while runner.step(1000.0 / FPS as f32) {
             runner.state.mv.debug1();
         }
         state = runner.state;
@@ -606,7 +606,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         }
     }
 
-    fn step(&mut self) -> bool {
+    fn step(&mut self, _dt: f32) -> bool {
         let mut cur = match self.cur.take() {
             None => match self.pendings.pop() {
                 Some(GCode1::Coord(cur)) => cur,
@@ -648,7 +648,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
             if len < std::f32::EPSILON {
                 cur = next;
             } else {
-                let step_size = next.f.unwrap_or(1800.0) / FPS as f32 / 60.0;
+                let step_size = next.f.unwrap_or(1800.0) / 60.0 / FPS as f32;
 
                 self.pendings.push(GCode1::Coord(next));
                 let mut step = len;
@@ -693,8 +693,8 @@ mod wrapper {
             }
         }
 
-        pub fn step(&mut self) -> u64 {
-            if !self.runner.step() {
+        pub fn step(&mut self, dt: f32) -> u64 {
+            if !self.runner.step(dt) {
                 return 0;
             }
             self.buf.clear();
@@ -754,10 +754,15 @@ pub unsafe extern "C" fn runner_delete(ptr: *const u8) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn runner_step(ptr: *const u8) -> u64 {
+pub unsafe extern "C" fn runner_step(ptr: *const u8, dt: f32, pos: *mut f32) -> u64 {
     let mut ret = 0u64;
     with_wrapper(ptr as usize, |runner| {
-        ret = runner.step();
+        ret = runner.step(dt);
+
+        let dst: &mut [f32] = std::slice::from_raw_parts_mut(pos, 3);
+        dst[0] = runner.runner.state.pos[0];
+        dst[1] = runner.runner.state.pos[1];
+        dst[2] = runner.runner.state.pos[2];
     });
     ret
 }
