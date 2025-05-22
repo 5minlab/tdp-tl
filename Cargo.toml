@@ -34,3 +34,6 @@ default = []
 
 [profile.release]
 debug = true
+
+[lib]
+crate-type = ["lib", "cdylib"]

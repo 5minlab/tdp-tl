@@ -5,6 +5,7 @@ use nalgebra::Vector3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
 use std::rc::Rc;
+use std::sync::*;
 
 mod cell;
 mod voxelidx;
@@ -102,6 +103,7 @@ pub trait Voxel: Default {
 
 #[derive(Default)]
 pub struct Model {
+    id: u64,
     offset: VoxelIdx,
 
     vertices: indexmap::IndexSet<VoxelIdx>,
@@ -286,7 +288,12 @@ pub fn model_serialize_gltf(
     Ok(())
 }
 
-pub fn model_serialize(models: &[Rc<Model>], path: &str, offset: [f32; 3], scale: f32) -> Result<()> {
+pub fn model_serialize(
+    models: &[Rc<Model>],
+    path: &str,
+    offset: [f32; 3],
+    scale: f32,
+) -> Result<()> {
     use std::io::Write;
 
     let w = File::create(path)?;
@@ -536,9 +543,11 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if false {
+    if true {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
-        while runner.step(out_filename) {}
+        while runner.step() {
+            runner.state.mv.debug1();
+        }
         state = runner.state;
     } else {
         for item in parsed {
@@ -597,16 +606,18 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         }
     }
 
-    fn step(&mut self, out_filename: &str) -> bool {
+    fn step(&mut self) -> bool {
         let mut cur = match self.cur.take() {
             None => match self.pendings.pop() {
                 Some(GCode1::Coord(cur)) => cur,
                 Some(GCode1::Layer(layer_idx)) => {
                     info!("layer {}", layer_idx);
+                    /*
                     if layer_idx > 0 && layer_idx % 10 == 0 {
                         let postfix = format!("{:03}", layer_idx);
                         self.state.export(out_filename, &postfix, true).unwrap();
                     }
+                    */
                     return true;
                 }
                 None => return false,
@@ -664,4 +675,100 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
 
         true
     }
+}
+
+mod wrapper {
+    use super::*;
+
+    pub struct FFIRunner {
+        pub runner: ExtrudeRunner<FSNVoxel>,
+        pub buf: Vec<u8>,
+    }
+
+    impl FFIRunner {
+        pub fn new(runner: ExtrudeRunner<FSNVoxel>) -> Self {
+            Self {
+                runner,
+                buf: vec![],
+            }
+        }
+
+        pub fn step(&mut self) -> u64 {
+            if !self.runner.step() {
+                return 0;
+            }
+            self.buf.clear();
+            let _ = self.runner.state.mv.write_dirty(&mut self.buf);
+            self.buf.len() as u64
+        }
+    }
+
+    pub type RunnerWrapper = Arc<RwLock<Option<FFIRunner>>>;
+
+    pub fn with_wrapper<F>(ptr: usize, f: F)
+    where
+        F: FnOnce(&mut FFIRunner),
+    {
+        let data: RunnerWrapper = unsafe { Arc::from_raw(ptr as *mut _) };
+        {
+            let mut guard = data.write().unwrap();
+            if let Some(data) = guard.as_mut() {
+                f(data);
+            }
+        }
+        std::mem::forget(data);
+    }
+
+    pub fn from_utf16(ptr: *const u16, len: u32) -> Option<String> {
+        if ptr.is_null() || len == 0 {
+            return None;
+        }
+        let data: &[u16] = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        String::from_utf16(data).ok()
+    }
+}
+
+use wrapper::*;
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_new(filename_ptr: *const u16, filename_len: u32) -> *const u8 {
+    let filename = from_utf16(filename_ptr, filename_len).unwrap();
+
+    let parsed = match parse_gcode(&filename) {
+        Ok(parsed) => parsed,
+        Err(_e) => {
+            return std::ptr::null();
+        }
+    };
+    let runner = FFIRunner::new(ExtrudeRunner::<FSNVoxel>::new(parsed));
+
+    let wrapper: RunnerWrapper = Arc::new(RwLock::new(Some(runner)));
+    let ptr = RunnerWrapper::into_raw(wrapper);
+    std::mem::transmute(ptr)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_delete(ptr: *const u8) {
+    let data: RunnerWrapper = unsafe { Arc::from_raw(ptr as *mut _) };
+    drop(data);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_step(ptr: *const u8) -> u64 {
+    let mut ret = 0u64;
+    with_wrapper(ptr as usize, |runner| {
+        ret = runner.step();
+    });
+    ret
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_retrieve(ptr: *const u8, buf: *mut u8, len: u64) {
+    with_wrapper(ptr as usize, |runner| {
+        if runner.buf.len() != len as usize {
+            return;
+        }
+        let dst: &mut [u8] = std::slice::from_raw_parts_mut(buf, len as usize);
+        dst.copy_from_slice(&runner.buf);
+    });
 }
