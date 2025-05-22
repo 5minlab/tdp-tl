@@ -600,6 +600,7 @@ struct ExtrudeState<V: Voxel + Default> {
     f: f32,
     e: f32,
 
+    wall_seconds: f32,
     last_sw: Stopwatch,
 }
 
@@ -611,6 +612,8 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
             pos: Vector3::new(0.0, 0.0, 0.0),
             f: 0.0,
             e: 0.0,
+
+            wall_seconds: 0.0,
             last_sw,
         }
     }
@@ -631,7 +634,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         let sw = Stopwatch::start_new();
         let model = self.mv.to_model();
-        info!("to_model: took={:.2}ms/{:.2}ms", last_dt, sw.ms());
+        info!("to_model: took={:.2}ms/{:.2}ms, wall: {:.0}s", last_dt, sw.ms(), self.wall_seconds);
 
         let sw = Stopwatch::start_new();
 
@@ -659,6 +662,37 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         Ok(())
     }
 
+    fn parse_move<'a, 'b>(&'a self, code: nom_gcode::GCode<'b>) -> (Vector3<f32>, f32, f32) {
+        let mut dst = self.pos;
+        let mut dst_e = self.e;
+        let mut target_f = self.f;
+
+        for (letter, value) in code.arguments() {
+            let letter = *letter;
+            let v = match value {
+                Some(v) => *v,
+                None => todo!(),
+            };
+
+            if letter == 'X' {
+                dst[0] = v;
+            }
+            if letter == 'Y' {
+                dst[1] = v;
+            }
+            if letter == 'Z' {
+                dst[2] = v;
+            }
+            if letter == 'E' {
+                dst_e = v;
+            }
+            if letter == 'F' {
+                target_f = v;
+            }
+        }
+        (dst, dst_e, target_f)
+    }
+
     fn handle_gcode<'a, 'b>(&'a mut self, code: nom_gcode::GCode<'b>) {
         if code.mnemonic != Mnemonic::General {
             return;
@@ -680,142 +714,108 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             }
         }
 
+        let mut dst = self.pos;
+        let mut dst_e = self.e;
+        let mut target_f = self.f;
         if code.major == 0 {
-            for (letter, value) in code.arguments() {
-                let letter = *letter;
-                let v = match value {
-                    Some(v) => *v,
-                    None => return,
-                };
-
-                if letter == 'X' {
-                    self.pos[0] = v;
-                }
-                if letter == 'Y' {
-                    self.pos[1] = v;
-                }
-                if letter == 'Z' {
-                    self.pos[2] = v;
-                }
-                if letter == 'F' {
-                    self.f = v;
-                }
-            }
+            (dst, dst_e, target_f) = self.parse_move(code);
         } else if code.major == 1 {
-            let mut dst = self.pos;
-            let mut dst_e = self.e;
-            for (letter, value) in code.arguments() {
-                let letter = *letter;
-                let v = match value {
-                    Some(v) => *v,
-                    None => return,
-                };
-
-                if letter == 'X' {
-                    dst[0] = v;
-                }
-                if letter == 'Y' {
-                    dst[1] = v;
-                }
-                if letter == 'Z' {
-                    dst[2] = v;
-                }
-                if letter == 'F' {
-                    self.f = v;
-                }
-                if letter == 'E' {
-                    dst_e = v;
-                }
-            }
-
-            if dst_e <= self.e {
-                self.pos = dst;
-                return;
-            }
-
-            let dir = (dst - self.pos).normalize();
-            let len = (dst - self.pos).magnitude();
-
-            // in centimeters
-            let delta_e = dst_e - self.e;
-            if delta_e <= 0.0 {
-                return;
-            }
-
-            // no inter-layer extrudeion
-            assert!(dir.z <= 0.0);
-
-            let z = intpos(dst[2]);
-            let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
-
-            let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
-            let offsets = [
-                oz + Vector3::new(0.0, 0.0, 0.0),
-                oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
-                oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-                oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
-            ];
-
-            let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
-                let mut cells = vec![];
-                for offset in &offsets {
-                    let pos = to_intpos(from + offset);
-                    let next_pos = to_intpos(to + offset);
-                    line_cells(pos, next_pos, &mut cells);
-                }
-                cells
-            };
-
-            // flow rate calculation
-            // with 1.75mm filament, calculate volume, in millimeters
-            let filament_volume = delta_e * FILAMENT_CROSS_SECION;
-
-            // TODO: accurate volume calculation
-            let total_blocks = filament_volume / BLOCK_VOLUME;
-            let blocks = total_blocks as usize;
-
-            debug!(
-                "{:?} -> {:?}, len={}, e={:?}, blocks={}",
-                self.pos,
-                dst,
-                len,
-                dst_e - self.e,
-                total_blocks
-            );
-
-            let cursor = self.pos;
-            /*
-            let step_size = 1.0;
-            let blocks_per_step = (total_blocks * step_size / len) as usize;
-            while (cursor - dst).magnitude() > step_size {
-                let next = cursor + dir * step_size;
-
-                let cells = gen_cells(cursor, next);
-                let extrudeed = extrude_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
-                if extrudeed != blocks_per_step {
-                    debug!(
-                        "extrudeed != blocks_per_step, skipping: {} != {}",
-                        extrudeed, blocks_per_step
-                    );
-                }
-                cursor = next;
-                blocks -= blocks_per_step;
-            }
-            */
-
-            // last segment
-            if blocks > 0 {
-                let cells = gen_cells(cursor, dst);
-                let extrudeed = extrude_at(&mut self.mv, zrange.clone(), &cells, blocks);
-                if extrudeed != blocks {
-                    debug!("extrudeed != blocks, skipping: {} != {}", extrudeed, blocks);
-                }
-            }
-
-            self.pos = dst;
-            self.e = dst_e;
+            (dst, dst_e, target_f) = self.parse_move(code);
         }
+
+        self.f = target_f;
+        if dst_e <= self.e {
+            self.pos = dst;
+            return;
+        }
+
+        let diff = dst - self.pos;
+        // in millimeters
+        let len = diff.magnitude();
+        let dir = diff.normalize();
+
+        let seconds = len / (self.f / 60.0);
+        self.wall_seconds += seconds;
+
+        // in centimeters
+        let delta_e = dst_e - self.e;
+        if delta_e <= 0.0 {
+            return;
+        }
+
+        // no inter-layer extrudeion
+        assert!(dir.z <= 0.0);
+
+        let z = intpos(dst[2]);
+        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+
+        let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
+        let offsets = [
+            oz + Vector3::new(0.0, 0.0, 0.0),
+            oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+            oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+            oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
+            oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
+        ];
+
+        let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
+            let mut cells = vec![];
+            for offset in &offsets {
+                let pos = to_intpos(from + offset);
+                let next_pos = to_intpos(to + offset);
+                line_cells(pos, next_pos, &mut cells);
+            }
+            cells
+        };
+
+        // flow rate calculation
+        // with 1.75mm filament, calculate volume, in millimeters
+        let filament_volume = delta_e * FILAMENT_CROSS_SECION;
+
+        // TODO: accurate volume calculation
+        let total_blocks = filament_volume / BLOCK_VOLUME;
+        let blocks = total_blocks as usize;
+
+        debug!(
+            "{:?} -> {:?}, len={}, e={:?}, blocks={}",
+            self.pos,
+            dst,
+            len,
+            dst_e - self.e,
+            total_blocks
+        );
+
+        let cursor = self.pos;
+        /*
+        let step_size = 1.0;
+        let blocks_per_step = (total_blocks * step_size / len) as usize;
+        while (cursor - dst).magnitude() > step_size {
+            let next = cursor + dir * step_size;
+
+            let cells = gen_cells(cursor, next);
+            let extrudeed = extrude_at(&mut mv, zrange.clone(), &cells, blocks_per_step);
+            if extrudeed != blocks_per_step {
+                debug!(
+                    "extrudeed != blocks_per_step, skipping: {} != {}",
+                    extrudeed, blocks_per_step
+                );
+            }
+            cursor = next;
+            blocks -= blocks_per_step;
+        }
+        */
+
+        // last segment
+        if blocks > 0 {
+            let cells = gen_cells(cursor, dst);
+            let extrudeed = extrude_at(&mut self.mv, zrange.clone(), &cells, blocks);
+            if extrudeed != blocks {
+                debug!("extrudeed != blocks, skipping: {} != {}", extrudeed, blocks);
+            }
+        }
+
+        self.pos = dst;
+        self.e = dst_e;
     }
 }
 
