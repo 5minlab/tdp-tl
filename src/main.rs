@@ -677,65 +677,30 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         Ok(())
     }
 
-    fn parse_move<'a, 'b>(&'a self, code: nom_gcode::GCode<'b>) -> (Vector3<f32>, f32, f32) {
-        let mut dst = self.pos;
-        let mut dst_e = self.e;
-        let mut target_f = self.f;
-
-        for (letter, value) in code.arguments() {
-            let letter = *letter;
-            let v = match value {
-                Some(v) => *v,
-                None => todo!(),
-            };
-
-            if letter == 'X' {
-                dst[0] = v;
-            }
-            if letter == 'Y' {
-                dst[1] = v;
-            }
-            if letter == 'Z' {
-                dst[2] = v;
-            }
-            if letter == 'E' {
-                dst_e = v;
-            }
-            if letter == 'F' {
-                target_f = v;
-            }
-        }
-        (dst, dst_e, target_f)
-    }
-
-    fn handle_gcode<'a, 'b>(&'a mut self, code: nom_gcode::GCode<'b>) {
-        if code.mnemonic != Mnemonic::General {
-            return;
-        }
-
+    fn handle_gcode(&mut self, code: GCode1Coord) {
         if code.major == 92 {
-            for (letter, value) in code.arguments() {
-                let letter = *letter;
-                let v = match value {
-                    Some(v) => *v,
-                    None => return,
-                };
-
-                if letter == 'E' {
-                    self.e = v;
-                } else {
-                    todo!();
-                }
-            }
+            self.e = code.e.unwrap_or(self.e);
         }
 
         let mut dst = self.pos;
         let mut dst_e = self.e;
         let mut target_f = self.f;
-        if code.major == 0 {
-            (dst, dst_e, target_f) = self.parse_move(code);
-        } else if code.major == 1 {
-            (dst, dst_e, target_f) = self.parse_move(code);
+        if code.major == 0 || code.major == 1 {
+            if let Some(x) = code.x {
+                dst[0] = x;
+            }
+            if let Some(y) = code.y {
+                dst[1] = y;
+            }
+            if let Some(z) = code.z {
+                dst[2] = z;
+            }
+            if let Some(e) = code.e {
+                dst_e = e;
+            }
+            if let Some(f) = code.f {
+                target_f = f;
+            }
         }
 
         self.f = target_f;
@@ -837,6 +802,82 @@ impl<V: Voxel + Default> ExtrudeState<V> {
     }
 }
 
+enum GCode1 {
+    Layer(usize),
+    Coord(GCode1Coord),
+}
+
+#[derive(Default, Clone, Copy)]
+struct GCode1Coord {
+    major: u32,
+    x: Option<f32>,
+    y: Option<f32>,
+    z: Option<f32>,
+    e: Option<f32>,
+    f: Option<f32>,
+}
+
+impl GCode1Coord {
+    fn from_argument<'a>(code: nom_gcode::GCode<'a>) -> Self {
+        let mut out = Self::default();
+        out.major = code.major;
+        for (letter, value) in code.arguments() {
+            let letter = *letter;
+            let v = match value {
+                Some(v) => *v,
+                None => todo!(),
+            };
+
+            if letter == 'X' {
+                out.x = Some(v);
+            }
+            if letter == 'Y' {
+                out.y = Some(v);
+            }
+            if letter == 'Z' {
+                out.z = Some(v);
+            }
+            if letter == 'E' {
+                out.e = Some(v);
+            }
+            if letter == 'F' {
+                out.f = Some(v);
+            }
+        }
+        out
+    }
+}
+
+fn parse_gcode(filename: &str) -> Result<Vec<GCode1>> {
+    let gcode = std::fs::read_to_string(filename)?;
+    let mut out = Vec::new();
+    for line in gcode.lines() {
+        let parsed = nom_gcode::parse_gcode(&line)?;
+        match parsed {
+            (_, Some(Comment(comment))) => {
+                let prefix = "LAYER:";
+                if !comment.0.starts_with(prefix) {
+                    continue;
+                }
+                let layer_idx = comment.0[prefix.len()..].parse::<usize>()?;
+                out.push(GCode1::Layer(layer_idx));
+            }
+            (_, Some(GCode(code))) => {
+                if code.mnemonic != Mnemonic::General {
+                    continue;
+                }
+
+                if [0, 1, 92].contains(&code.major) {
+                    out.push(GCode1::Coord(GCode1Coord::from_argument(code)));
+                }
+            }
+            (_, _) => (),
+        }
+    }
+
+    Ok(out)
+}
+
 fn generate_gcode<V: Voxel + Default>(
     filename: &str,
     out_filename: &str,
@@ -846,22 +887,12 @@ fn generate_gcode<V: Voxel + Default>(
 ) -> Result<()> {
     let mut state = ExtrudeState::<V>::default();
 
-    let gcode = std::fs::read_to_string(filename)?;
     let sw = Stopwatch::start_new();
-    let mut parsed = Vec::new();
-    for line in gcode.lines() {
-        let item = nom_gcode::parse_gcode(&line)?;
-        parsed.push(item);
-    }
+    let parsed = parse_gcode(filename)?;
 
     for item in parsed {
         match item {
-            (_, Some(Comment(comment))) => {
-                let prefix = "LAYER:";
-                if !comment.0.starts_with(prefix) {
-                    continue;
-                }
-                let layer_idx = comment.0[prefix.len()..].parse::<usize>()?;
+            GCode1::Layer(layer_idx) => {
                 if layer_idx == 0 {
                     continue;
                 }
@@ -875,10 +906,9 @@ fn generate_gcode<V: Voxel + Default>(
                     state.export(out_filename, &postfix, out_glb)?;
                 }
             }
-            (_, Some(GCode(code))) => {
-                state.handle_gcode(code);
+            GCode1::Coord(coord) => {
+                state.handle_gcode(coord);
             }
-            (_, _) => (),
         }
     }
 
