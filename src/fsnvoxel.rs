@@ -16,6 +16,10 @@ fn write_model<W: std::io::Write>(model: &Model, mut writer: W) -> Result<()> {
     use byteorder::{LittleEndian, WriteBytesExt};
 
     writer.write_u64::<LittleEndian>(model.id)?;
+    writer.write_f32::<LittleEndian>(model.offset[0] as f32)?;
+    writer.write_f32::<LittleEndian>(model.offset[1] as f32)?;
+    writer.write_f32::<LittleEndian>(model.offset[2] as f32)?;
+
     writer.write_u32::<LittleEndian>(model.raw_vertices.len() as u32 * 3)?;
     for [x, y, z] in &model.raw_vertices {
         writer.write_f32::<LittleEndian>(*x)?;
@@ -128,7 +132,7 @@ impl FSNVoxel {
         let mut mesh = SurfaceNetsBuffer::default();
         surface_nets(&sdf, &ChunkShape {}, [0; 3], [33; 3], &mut mesh);
 
-        let indices = if true {
+        let indices = if false {
             mesh.indices.clone()
         } else {
             let data: &[u8] = unsafe {
@@ -143,7 +147,7 @@ impl FSNVoxel {
                 &mesh.indices,
                 &adapter,
                 0,
-                0.001f32,
+                0.002f32,
                 meshopt::simplify::SimplifyOptions::None,
                 Some(&mut error),
             );
@@ -164,13 +168,15 @@ impl FSNVoxel {
         }
 
         let mut model = Model::default();
+        let out_offset = CELL_SIZE as f32 / -2f32;
         model.id = idx;
+        model.offset = base + VoxelIdx::unitsize(CELL_SIZE as i32 / 2);
         for oi in &new_indices {
             let oi = *oi as usize;
             let pos = mesh.positions[oi];
             model
                 .raw_vertices
-                .push([pos[0] + bx as f32, pos[1] + by as f32, pos[2] + bz as f32]);
+                .push([pos[0] - out_offset, pos[1] - out_offset, pos[2] - out_offset]);
             model.raw_normals.push(mesh.normals[oi]);
         }
 

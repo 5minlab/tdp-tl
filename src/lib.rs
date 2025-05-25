@@ -65,7 +65,7 @@ impl BoundingBox {
 }
 
 // unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
-const UNIT: f32 = LAYER_HEIGHT / 3.0;
+const UNIT: f32 = LAYER_HEIGHT / 2.0;
 
 // block volume in cubic millimeters
 const BLOCK_VOLUME: f32 = UNIT * UNIT * UNIT;
