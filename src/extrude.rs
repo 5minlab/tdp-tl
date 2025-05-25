@@ -164,7 +164,11 @@ pub fn extrude_at_deque<V: Voxel>(
             if n == extrudeed {
                 break;
             }
+        } else {
+            // TODO
+            continue;
         }
+
         if depth == 0 {
             continue;
         }
