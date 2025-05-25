@@ -14,8 +14,6 @@ pub struct GCode1Coord {
     pub z: Option<f32>,
     pub e: Option<f32>,
     pub f: Option<f32>,
-
-    pub chunked: bool,
 }
 
 impl GCode1Coord {
@@ -69,10 +67,11 @@ impl GCode1Coord {
     }
 }
 
-pub fn parse_gcode(filename: &str) -> Result<Vec<GCode1>> {
+pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
     let gcode = std::fs::read_to_string(filename)?;
     let mut out = Vec::new();
-    for line in gcode.lines() {
+    for (number, line) in gcode.lines().enumerate() {
+        let number = number + 1;
         let parsed = nom_gcode::parse_gcode(&line)?;
         match parsed {
             (_, Some(Comment(comment))) => {
@@ -81,7 +80,7 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<GCode1>> {
                     continue;
                 }
                 let layer_idx = comment.0[prefix.len()..].parse::<usize>()?;
-                out.push(GCode1::Layer(layer_idx));
+                out.push((number, GCode1::Layer(layer_idx)));
             }
             (_, Some(GCode(code))) => {
                 if code.mnemonic != Mnemonic::General {
@@ -89,7 +88,7 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<GCode1>> {
                 }
 
                 if [0, 1, 92].contains(&code.major) {
-                    out.push(GCode1::Coord(GCode1Coord::from_argument(code)));
+                    out.push((number, GCode1::Coord(GCode1Coord::from_argument(code))));
                 }
             }
             (_, _) => (),

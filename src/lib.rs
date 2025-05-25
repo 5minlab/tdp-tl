@@ -401,7 +401,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         Ok(())
     }
 
-    fn handle_gcode(&mut self, code: GCode1Coord) {
+    fn handle_gcode(&mut self, code: GCode1Coord) -> usize {
         if code.major == 92 {
             self.e = code.e.unwrap_or(self.e);
         }
@@ -430,14 +430,14 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         self.f = target_f;
         if dst_e <= self.e {
             self.pos = dst;
-            return;
+            return 0;
         }
 
         let diff = dst - self.pos;
         // in millimeters
         let len = diff.magnitude();
-        if len < 0.01 {
-            return;
+        if len < std::f32::EPSILON {
+            return 0;
         }
         let dir = diff.normalize();
 
@@ -446,8 +446,8 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         // in centimeters
         let delta_e = dst_e - self.e;
-        if delta_e <= 0.0 {
-            return;
+        if delta_e <= std::f32::EPSILON {
+            return 0;
         }
 
         // no inter-layer extrusion
@@ -481,7 +481,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         // TODO: accurate volume calculation
         let total_blocks = filament_volume / BLOCK_VOLUME;
-        let blocks = total_blocks as usize;
+        let mut blocks = total_blocks as usize;
 
         debug!(
             "{:?} -> {:?}, len={}, e={:?}, blocks={}",
@@ -524,10 +524,12 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             if extrudeed != blocks {
                 debug!("extrudeed != blocks, skipping: {} != {}", extrudeed, blocks);
             }
+            blocks -= extrudeed;
         }
 
         self.pos = dst;
         self.e = dst_e;
+        blocks
     }
 }
 
@@ -543,14 +545,14 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if false {
+    if true {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
-        while runner.step(1000.0 / FPS as f32) {
+        while !runner.step(1.0 / FPS as f32) {
             runner.state.mv.debug1();
         }
         state = runner.state;
     } else {
-        for item in parsed {
+        for (_line, item) in parsed {
             match item {
                 GCode1::Layer(layer_idx) => {
                     if layer_idx == 0 {
@@ -591,89 +593,93 @@ pub fn generate_gcode<V: Voxel + Default>(
 struct ExtrudeRunner<V: Voxel> {
     pub state: ExtrudeState<V>,
 
-    cur: Option<GCode1Coord>,
-    pendings: Vec<GCode1>,
+    pendings: Vec<(usize, GCode1)>,
 }
 
 impl<V: Voxel + Default> ExtrudeRunner<V> {
-    fn new(mut pendings: Vec<GCode1>) -> Self {
+    fn new(mut pendings: Vec<(usize, GCode1)>) -> Self {
         pendings.reverse();
 
         Self {
             state: ExtrudeState::default(),
-            cur: None,
             pendings,
         }
     }
 
-    fn step(&mut self, _dt: f32) -> bool {
-        let mut cur = match self.cur.take() {
-            None => match self.pendings.pop() {
-                Some(GCode1::Coord(cur)) => cur,
-                Some(GCode1::Layer(layer_idx)) => {
-                    info!("layer {}", layer_idx);
-                    /*
-                    if layer_idx > 0 && layer_idx % 10 == 0 {
-                        let postfix = format!("{:03}", layer_idx);
-                        self.state.export(out_filename, &postfix, true).unwrap();
-                    }
-                    */
+    fn step(&mut self, mut dt: f32) -> bool {
+        while dt > std::f32::EPSILON {
+            match self.step0(dt) {
+                (true, _) => {
+                    // no more steps
                     return true;
                 }
-                None => return false,
-            },
-            Some(cur) => cur,
-        };
-
-        if !cur.chunked {
-            let prev = GCode1Coord {
-                major: cur.major,
-                x: Some(self.state.pos[0]),
-                y: Some(self.state.pos[1]),
-                z: Some(self.state.pos[2]),
-                e: Some(self.state.e),
-                f: Some(self.state.f),
-                chunked: true,
-            };
-            let mut next = prev.apply(&cur);
-
-            let dx = next.x.unwrap_or(0.0) - prev.x.unwrap_or(0.0);
-            let dy = next.y.unwrap_or(0.0) - prev.y.unwrap_or(0.0);
-            let dz = next.z.unwrap_or(0.0) - prev.z.unwrap_or(0.0);
-            let de = next.e.unwrap_or(0.0) - prev.e.unwrap_or(0.0);
-
-            let diff = Vector3::new(dx, dy, dz);
-
-            let len = diff.magnitude();
-            if len < std::f32::EPSILON {
-                cur = next;
-            } else {
-                let step_size = next.f.unwrap_or(1800.0) / 60.0 / FPS as f32;
-
-                self.pendings.push(GCode1::Coord(next));
-                let mut step = len;
-                while step >= step_size {
-                    step -= step_size;
-                    let dx = dx * step / len;
-                    let dy = dy * step / len;
-                    let dz = dz * step / len;
-                    let de = de * step / len;
-
-                    next.x = Some(prev.x.unwrap_or(0.0) + dx);
-                    next.y = Some(prev.y.unwrap_or(0.0) + dy);
-                    next.z = Some(prev.z.unwrap_or(0.0) + dz);
-                    next.e = Some(prev.e.unwrap_or(0.0) + de);
-
-                    self.pendings.push(GCode1::Coord(next));
+                (false, step_dt) => {
+                    dt -= step_dt;
                 }
-                cur = prev;
             }
         }
+        false
+    }
 
-        assert!(cur.chunked);
-        self.state.handle_gcode(cur);
+    fn step0(&mut self, dt: f32) -> (bool, f32) {
+        let (line, cur) = match self.pendings.pop() {
+            Some((line, GCode1::Coord(cur))) => (line, cur),
+            Some((_, GCode1::Layer(layer_idx))) => {
+                info!("layer {}", layer_idx);
+                /*
+                if layer_idx > 0 && layer_idx % 10 == 0 {
+                    let postfix = format!("{:03}", layer_idx);
+                    self.state.export(out_filename, &postfix, true).unwrap();
+                }
+                */
+                return (false, 0.0);
+            }
+            None => return (true, 0.0),
+        };
 
-        true
+        let prev = GCode1Coord {
+            major: cur.major,
+            x: Some(self.state.pos[0]),
+            y: Some(self.state.pos[1]),
+            z: Some(self.state.pos[2]),
+            e: Some(self.state.e),
+            f: Some(self.state.f),
+        };
+        let mut next = prev.apply(&cur);
+
+        let dx = next.x.unwrap_or(0.0) - prev.x.unwrap_or(0.0);
+        let dy = next.y.unwrap_or(0.0) - prev.y.unwrap_or(0.0);
+        let dz = next.z.unwrap_or(0.0) - prev.z.unwrap_or(0.0);
+        let de = next.e.unwrap_or(0.0) - prev.e.unwrap_or(0.0);
+
+        let diff = Vector3::new(dx, dy, dz);
+
+        let len = diff.magnitude();
+        if len < std::f32::EPSILON {
+            return (false, 0f32);
+        }
+
+        let step_len = next.f.unwrap_or(1800.0) / 60.0 * dt;
+        if step_len >= len {
+            // no need to split
+            self.state.handle_gcode(next);
+            return (false, dt * len / step_len);
+        }
+
+        let dx = dx * step_len / len;
+        let dy = dy * step_len / len;
+        let dz = dz * step_len / len;
+        let de = de * step_len / len;
+
+        next.x = Some(prev.x.unwrap_or(0.0) + dx);
+        next.y = Some(prev.y.unwrap_or(0.0) + dy);
+        next.z = Some(prev.z.unwrap_or(0.0) + dz);
+        next.e = Some(prev.e.unwrap_or(0.0) + de);
+        self.state.handle_gcode(next);
+
+        self.pendings.push((line, GCode1::Coord(cur)));
+
+        (false, dt)
     }
 }
 
@@ -694,7 +700,7 @@ mod wrapper {
         }
 
         pub fn step(&mut self, dt: f32) -> u64 {
-            if !self.runner.step(dt) {
+            if self.runner.step(dt) {
                 return 0;
             }
             self.buf.clear();
