@@ -147,14 +147,13 @@ pub fn extrude_at_deque<V: Voxel>(
     let mut candidates = VecDeque::with_capacity(1024 * 8);
     let mut visited = ChunkedVoxel::default();
 
-    const MAX_DIST_AXIS: usize = (LAYER_HEIGHT / UNIT) as usize;
-    const MAX_DIST_3: usize = MAX_DIST_AXIS * MAX_DIST_AXIS * MAX_DIST_AXIS * 2;
+    const MAX_DIST: usize = (NOZZLE_SIZE / UNIT) as usize;
 
     for pos in cells {
         visited.add(*pos);
         candidates.push_back(HeapItem {
             pos: *pos,
-            depth: MAX_DIST_3 as u16,
+            depth: MAX_DIST as u16,
         });
     }
 
@@ -164,9 +163,6 @@ pub fn extrude_at_deque<V: Voxel>(
             if n == extrudeed {
                 break;
             }
-        } else {
-            // TODO
-            continue;
         }
 
         if depth == 0 {
