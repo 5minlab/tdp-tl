@@ -176,7 +176,7 @@ impl FSNVoxel {
             let pos = mesh.positions[oi];
             model
                 .raw_vertices
-                .push([pos[0] - out_offset, pos[1] - out_offset, pos[2] - out_offset]);
+                .push([pos[0] + out_offset, pos[1] + out_offset, pos[2] + out_offset]);
             model.raw_normals.push(mesh.normals[oi]);
         }
 
