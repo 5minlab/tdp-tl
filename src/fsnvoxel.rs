@@ -75,12 +75,22 @@ impl FSNVoxel {
         writer.write_u32::<LittleEndian>(indices.len() as u32)?;
         for idx in indices.iter() {
             let idx = *idx;
-            let model = self.build_model(idx);
-            self.model_cache.insert(idx, model.clone());
+            let model = self.rebuild_model(idx);
             write_model(&model, &mut writer)?;
         }
 
         Ok(())
+    }
+
+    fn rebuild_model(&mut self, idx: u64) -> Rc<Model> {
+        let model = self.build_model(idx);
+        self.model_cache.insert(idx, model.clone());
+
+        let coord = chunk_base(idx);
+        let coord_dirty = coord.shift_down(CELL_SIZE_BITS);
+        self.dirty.remove(&coord_dirty);
+
+        model
     }
 
     fn build_model(&mut self, idx: u64) -> Rc<Model> {
@@ -233,8 +243,7 @@ impl Voxel for FSNVoxel {
                 models.push(model.clone());
                 continue;
             }
-            let model = self.build_model(idx);
-            self.model_cache.insert(idx, model.clone());
+            let model = self.rebuild_model(idx);
             models.push(model);
         }
 
@@ -261,13 +270,14 @@ impl Voxel for FSNVoxel {
     }
 
     fn debug1(&mut self) -> usize {
+        /*
         let mut buf = Vec::new();
         self.write_dirty(&mut buf).unwrap();
         buf.len()
-        /*
         let len = self.dirty.len();
         self.dirty.clear();
         len
             */
+        0
     }
 }
