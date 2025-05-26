@@ -103,9 +103,6 @@ impl StreamingVoxel for ChunkedVoxel {
         for coord_dirty in dirty.iter() {
             let coord = coord_dirty.shift_up(CELL_SIZE_BITS);
             let idx = chunk_idx(coord);
-            if !self.base.chunks.contains_key(&idx) {
-                continue;
-            }
             indices.push(idx);
         }
 
@@ -183,5 +180,13 @@ impl Voxel for ChunkedVoxel {
         }
 
         Ok(())
+    }
+
+    fn debug1(&mut self) -> usize {
+        let mut out = vec![];
+        self.write_dirty(&mut out).unwrap();
+        // eprintln!("{} bytes written", out.len());
+
+        out.len()
     }
 }
