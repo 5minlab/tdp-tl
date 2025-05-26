@@ -101,6 +101,10 @@ pub trait Voxel: Default {
     }
 }
 
+pub trait StreamingVoxel: Voxel {
+    fn write_dirty<W: std::io::Write>(&mut self, writer: W) -> Result<()>;
+}
+
 #[derive(Default)]
 pub struct Model {
     id: u64,
@@ -683,16 +687,18 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
     }
 }
 
+type FFIVoxel = FSNVoxel;
+
 mod wrapper {
     use super::*;
 
-    pub struct FFIRunner {
-        pub runner: ExtrudeRunner<FSNVoxel>,
+    pub struct FFIRunner<V: StreamingVoxel> {
+        pub runner: ExtrudeRunner<V>,
         pub buf: Vec<u8>,
     }
 
-    impl FFIRunner {
-        pub fn new(runner: ExtrudeRunner<FSNVoxel>) -> Self {
+    impl<V: StreamingVoxel> FFIRunner<V> {
+        pub fn new(runner: ExtrudeRunner<V>) -> Self {
             Self {
                 runner,
                 buf: vec![],
@@ -709,11 +715,11 @@ mod wrapper {
         }
     }
 
-    pub type RunnerWrapper = Arc<RwLock<Option<FFIRunner>>>;
+    pub type RunnerWrapper = Arc<RwLock<Option<FFIRunner<FFIVoxel>>>>;
 
     pub fn with_wrapper<F>(ptr: usize, f: F)
     where
-        F: FnOnce(&mut FFIRunner),
+        F: FnOnce(&mut FFIRunner<FFIVoxel>),
     {
         let data: RunnerWrapper = unsafe { Arc::from_raw(ptr as *mut _) };
         {
@@ -746,7 +752,7 @@ pub unsafe extern "C" fn runner_new(filename_ptr: *const u16, filename_len: u32)
             return std::ptr::null();
         }
     };
-    let runner = FFIRunner::new(ExtrudeRunner::<FSNVoxel>::new(parsed));
+    let runner = FFIRunner::new(ExtrudeRunner::<FFIVoxel>::new(parsed));
 
     let wrapper: RunnerWrapper = Arc::new(RwLock::new(Some(runner)));
     let ptr = RunnerWrapper::into_raw(wrapper);

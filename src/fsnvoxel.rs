@@ -1,11 +1,11 @@
-use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
+use super::*;
 
 use super::cell::*;
 use super::chunkedvoxel::ChunkedBase;
+use ahash::*;
 use anyhow::Result;
 use fast_surface_nets::ndshape::{ConstShape, ConstShape3u32};
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
-use std::collections::*;
 use std::rc::Rc;
 
 // A 16^3 chunk with 1-voxel boundary padding.
@@ -47,8 +47,8 @@ fn write_model<W: std::io::Write>(model: &Model, mut writer: W) -> Result<()> {
 pub struct FSNVoxel {
     base: ChunkedBase,
 
-    dirty: HashSet<VoxelIdx>,
-    model_cache: HashMap<u64, Rc<Model>>,
+    dirty: AHashSet<VoxelIdx>,
+    model_cache: AHashMap<u64, Rc<Model>>,
 }
 
 impl FSNVoxel {
@@ -57,33 +57,6 @@ impl FSNVoxel {
             let coord = coord_dirty.shift_up(CELL_SIZE_BITS);
             self.model_cache.remove(&chunk_idx(coord));
         }
-    }
-
-    pub fn write_dirty<W: std::io::Write>(&mut self, mut writer: W) -> Result<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
-
-        writer.write_u32::<LittleEndian>(1)?;
-        writer.write_f32::<LittleEndian>(UNIT)?;
-
-        let dirty = std::mem::take(&mut self.dirty);
-        let mut indices = Vec::new();
-        for coord_dirty in dirty.iter() {
-            let coord = coord_dirty.shift_up(CELL_SIZE_BITS);
-            let idx = chunk_idx(coord);
-            if !self.base.chunks.contains_key(&idx) {
-                continue;
-            }
-            indices.push(idx);
-        }
-
-        writer.write_u32::<LittleEndian>(indices.len() as u32)?;
-        for idx in indices.iter() {
-            let idx = *idx;
-            let model = self.rebuild_model(idx);
-            write_model(&model, &mut writer)?;
-        }
-
-        Ok(())
     }
 
     fn rebuild_model(&mut self, idx: u64) -> Rc<Model> {
@@ -174,9 +147,11 @@ impl FSNVoxel {
         for oi in &new_indices {
             let oi = *oi as usize;
             let pos = mesh.positions[oi];
-            model
-                .raw_vertices
-                .push([pos[0] + out_offset, pos[1] + out_offset, pos[2] + out_offset]);
+            model.raw_vertices.push([
+                pos[0] + out_offset,
+                pos[1] + out_offset,
+                pos[2] + out_offset,
+            ]);
             model.raw_normals.push(mesh.normals[oi]);
         }
 
@@ -196,6 +171,37 @@ impl FSNVoxel {
         Rc::new(model)
     }
 }
+
+impl StreamingVoxel for FSNVoxel {
+    fn write_dirty<W: std::io::Write>(&mut self, mut writer: W) -> Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        writer.write_u32::<LittleEndian>(1)?;
+        writer.write_f32::<LittleEndian>(UNIT)?;
+
+        let dirty = std::mem::take(&mut self.dirty);
+        let mut indices = Vec::new();
+        for coord_dirty in dirty.iter() {
+            let coord = coord_dirty.shift_up(CELL_SIZE_BITS);
+            let idx = chunk_idx(coord);
+            if !self.base.chunks.contains_key(&idx) {
+                continue;
+            }
+            indices.push(idx);
+        }
+
+        writer.write_u32::<LittleEndian>(indices.len() as u32)?;
+        for idx in indices.iter() {
+            let idx = *idx;
+            let model = self.rebuild_model(idx);
+            write_model(&model, &mut writer)?;
+        }
+
+        Ok(())
+    }
+}
+
+
 
 impl Voxel for FSNVoxel {
     fn ranges(&self) -> usize {
@@ -267,6 +273,7 @@ impl Voxel for FSNVoxel {
         writer.write_f32::<LittleEndian>(UNIT)?;
 
         let models = self.to_model();
+
         writer.write_u32::<LittleEndian>(models.len() as u32)?;
         for model in models {
             write_model(&model, &mut writer)?;

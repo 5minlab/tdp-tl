@@ -1,6 +1,5 @@
 use super::{Model, VoxelIdx};
 use binary_greedy_meshing as bgm;
-use std::cell::Cell;
 use std::collections::BTreeSet;
 
 pub const CELL_SIZE_BITS: i32 = 5;
@@ -9,14 +8,12 @@ pub const CELL_SIZE: usize = 32;
 #[derive(Debug)]
 pub struct BGMCell {
     // 32 x 32 x 32 cell, 1 bit per voxel
-    pub dirty: Cell<bool>,
     data: [u32; CELL_SIZE * CELL_SIZE],
 }
 
 impl std::default::Default for BGMCell {
     fn default() -> Self {
         Self {
-            dirty: Cell::new(false),
             data: [0; 1024],
         }
     }
@@ -74,7 +71,6 @@ impl BGMCell {
         let idx = Self::index(x, y);
         let mask = Self::bitmask(z);
         self.data[idx] |= mask;
-        self.dirty.set(true);
     }
 
     pub fn fill_bgm_solid(&self, voxels: &mut [u16; bgm::CS_P3]) {
