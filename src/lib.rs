@@ -408,6 +408,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
     fn handle_gcode(&mut self, code: GCode1Coord) -> usize {
         if code.major == 92 {
             self.e = code.e.unwrap_or(self.e);
+            return 0;
         }
 
         let mut dst = self.pos;
@@ -640,6 +641,10 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
             }
             None => return (true, 0.0),
         };
+        if cur.major == 92 {
+            self.state.e = cur.e.unwrap_or(self.state.e);
+            return (false, 0.0);
+        }
 
         let prev = GCode1Coord {
             major: cur.major,

@@ -1,5 +1,5 @@
-use nom_gcode::{GCodeLine::*, Mnemonic};
 use anyhow::Result;
+use nom_gcode::{GCodeLine::*, Mnemonic};
 
 pub enum GCode1 {
     Layer(usize),
@@ -97,5 +97,3 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
 
     Ok(out)
 }
-
-

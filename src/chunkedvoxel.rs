@@ -183,10 +183,13 @@ impl Voxel for ChunkedVoxel {
     }
 
     fn debug1(&mut self) -> usize {
+        /*
         let mut out = vec![];
         self.write_dirty(&mut out).unwrap();
         // eprintln!("{} bytes written", out.len());
 
         out.len()
+        */
+        0
     }
 }
