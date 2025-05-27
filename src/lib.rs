@@ -32,6 +32,7 @@ pub use vdbvoxel::VDBVoxel;
 mod extrude;
 pub use extrude::*;
 mod gcode;
+pub use cell::*;
 pub use gcode::*;
 
 impl std::ops::Index<usize> for VoxelIdx {
@@ -84,7 +85,7 @@ const NOZZLE_SIZE: f32 = 0.4f32;
 const FPS: usize = 30;
 
 // tunables
-const INJECT_OFFSET_Z: f32 = 0.0; //UNIT / 2.0;
+const INJECT_OFFSET_Z: f32 = 0.0; // LAYER_HEIGHT / 2.0;
 
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
@@ -367,7 +368,7 @@ fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
 }
 
 impl<V: Voxel + Default> ExtrudeState<V> {
-    fn export(&mut self, out_filename: &str, postfix: &str, out_glb: bool) -> Result<()> {
+    fn export(&mut self, out_filename: &str, postfix: &str) -> Result<()> {
         let last_dt = self.last_sw.ms();
 
         let sw = Stopwatch::start_new();
@@ -381,7 +382,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         let sw = Stopwatch::start_new();
 
-        let out_filename = if out_glb {
+        let out_filename = if true {
             let filename = format!("{}/gcode_{}.glb", out_filename, postfix);
             model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
 
@@ -464,10 +465,10 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
         let offsets = [
             oz + Vector3::new(0.0, 0.0, 0.0),
+            oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 8.0,
+            oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 8.0,
             oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-            oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 3.0,
             oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 6.0,
-            oz + Vector3::new(-dir.y, dir.x, 0.0) * NOZZLE_SIZE / 3.0,
         ];
 
         let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
@@ -543,7 +544,6 @@ pub fn generate_gcode<V: Voxel + Default>(
     out_filename: &str,
     layer: usize,
     out_layers: bool,
-    out_glb: bool,
 ) -> Result<()> {
     let mut state = ExtrudeState::<V>::default();
 
@@ -570,7 +570,7 @@ pub fn generate_gcode<V: Voxel + Default>(
 
                     if out_layers && layer_idx % 10 == 0 {
                         let postfix = format!("{:03}", layer_idx);
-                        state.export(out_filename, &postfix, out_glb)?;
+                        state.export(out_filename, &postfix)?;
                     }
                 }
                 GCode1::Coord(coord) => {
@@ -579,7 +579,7 @@ pub fn generate_gcode<V: Voxel + Default>(
             }
         }
     }
-    state.export(out_filename, "full", out_glb)?;
+    state.export(out_filename, "full")?;
 
     let blocks = state.mv.bounding_box().count;
     info!(

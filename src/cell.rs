@@ -1,11 +1,11 @@
 use super::{Model, VoxelIdx};
 use binary_greedy_meshing as bgm;
-use std::collections::BTreeSet;
+use std::collections::*;
 
 pub const CELL_SIZE_BITS: i32 = 5;
 pub const CELL_SIZE: usize = 32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BGMCell {
     // 32 x 32 x 32 cell, 1 bit per voxel
     data: [u32; CELL_SIZE * CELL_SIZE],
@@ -13,9 +13,7 @@ pub struct BGMCell {
 
 impl std::default::Default for BGMCell {
     fn default() -> Self {
-        Self {
-            data: [0; 1024],
-        }
+        Self { data: [0; 1024] }
     }
 }
 
@@ -26,6 +24,29 @@ pub fn decode_quad(quad: u64) -> (VoxelIdx, [i32; 2]) {
     let w = ((quad >> 18) & 0b111111) as i32;
     let h = ((quad >> 24) & 0b111111) as i32;
     (VoxelIdx::from([x, y, z]), [w as i32, h as i32])
+}
+
+pub fn cell_neighbors(coord: VoxelIdx) -> Vec<VoxelIdx> {
+    let mut v = Vec::with_capacity(6);
+    if coord[0] > 0 {
+        v.push(coord + VoxelIdx::new([-1, 0, 0]));
+    }
+    if coord[0] < CELL_SIZE as i32 - 1 {
+        v.push(coord + VoxelIdx::new([1, 0, 0]));
+    }
+    if coord[1] > 0 {
+        v.push(coord + VoxelIdx::new([0, -1, 0]));
+    }
+    if coord[1] < CELL_SIZE as i32 - 1 {
+        v.push(coord + VoxelIdx::new([0, 1, 0]));
+    }
+    if coord[2] > 0 {
+        v.push(coord + VoxelIdx::new([0, 0, -1]));
+    }
+    if coord[2] < CELL_SIZE as i32 - 1 {
+        v.push(coord + VoxelIdx::new([0, 0, 1]));
+    }
+    v
 }
 
 /// Call `op(index)` exactly once for every boundary voxel.
@@ -72,6 +93,11 @@ impl BGMCell {
         let mask = Self::bitmask(z);
         self.data[idx] |= mask;
     }
+    pub fn clear(&mut self, x: usize, y: usize, z: usize) {
+        let idx = Self::index(x, y);
+        let mask = Self::bitmask(z);
+        self.data[idx] &= !mask;
+    }
 
     pub fn fill_bgm_solid(&self, voxels: &mut [u16; bgm::CS_P3]) {
         use std::collections::VecDeque;
@@ -90,11 +116,7 @@ impl BGMCell {
         let mut queue = VecDeque::new();
         queue.push_back(0);
 
-        const OFFSETS: [usize; 3] = [
-            1,
-            bgm::CS_P,
-            bgm::CS_P2,
-        ];
+        const OFFSETS: [usize; 3] = [1, bgm::CS_P, bgm::CS_P2];
 
         while let Some(idx) = queue.pop_front() {
             if voxels[idx] & TOVISIT_MASK == 0 {
@@ -192,6 +214,60 @@ impl BGMCell {
         }
 
         count
+    }
+
+    pub fn neighbors_sum(&self, coord: VoxelIdx) -> u8 {
+        cell_neighbors(coord)
+            .iter()
+            .map(|n| {
+                let [x, y, z] = cell_idx(*n);
+                if self.get(x, y, z) {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum()
+    }
+
+    pub fn simplify(&mut self) -> usize {
+        let mut v = VecDeque::new();
+
+        for x in 0..CELL_SIZE {
+            for y in 0..CELL_SIZE {
+                for z in 0..CELL_SIZE {
+                    let val = self.get(x, y, z);
+                    let sum = self.neighbors_sum(VoxelIdx::new([x as i32, y as i32, z as i32]));
+                    if val || sum > 0 {
+                        v.push_back(VoxelIdx::new([x as i32, y as i32, z as i32]));
+                    }
+                }
+            }
+        }
+
+        let mut mutations = 0;
+        while let Some(coord) = v.pop_front() {
+            let [x, y, z] = cell_idx(coord);
+
+            let val = self.get(x, y, z);
+            let sum = self.neighbors_sum(coord);
+            if !val && sum > 3 {
+                self.set(x, y, z);
+                mutations += 1;
+            } else if val && sum < 3 {
+                self.clear(x, y, z);
+                mutations += 1;
+            } else {
+                continue;
+            }
+
+            for n in cell_neighbors(coord) {
+                v.push_back(n);
+            }
+            v.push_back(coord);
+        }
+
+        mutations
     }
 }
 

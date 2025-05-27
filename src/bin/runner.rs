@@ -121,10 +121,6 @@ struct SubCommandGcodeLayers {
     /// fsn
     #[argh(switch)]
     vdb: bool,
-
-    /// glb
-    #[argh(switch)]
-    glb: bool,
 }
 
 const SIZE: i32 = 100i32;
@@ -326,28 +322,28 @@ fn main() -> Result<()> {
 
         SubCommandEnum::Gcode(opt) => {
             let layer = opt.layer.unwrap_or(std::usize::MAX);
-            generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.out, layer, false, false)
+            generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.out, layer, false)
         }
 
         SubCommandEnum::GcodeLayers(opt) => {
             let layer = std::usize::MAX;
             if opt.rangeset {
-                generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<RangeSetVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.svo {
-                generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<SVOVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.chunked {
-                generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<ChunkedVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.lod {
-                generate_gcode::<LodVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<LodVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.iso {
-                generate_gcode::<IsoVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<IsoVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.fsn {
-                generate_gcode::<FSNVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<FSNVoxel>(&opt.gcode, &opt.outdir, layer, true)
             } else if opt.vdb {
-                // generate_gcode::<VDBVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                // generate_gcode::<VDBVoxel>(&opt.gcode, &opt.outdir, layer, true)
                 Ok(())
             } else {
-                generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true, opt.glb)
+                generate_gcode::<MonotonicVoxel>(&opt.gcode, &opt.outdir, layer, true)
             }
         }
     }

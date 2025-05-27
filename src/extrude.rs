@@ -1,6 +1,8 @@
 use super::*;
 use std::ops::Range;
 
+const MAX_DIST: usize = (NOZZLE_SIZE * 2.0 / UNIT) as usize;
+
 pub fn line_cells(pos0: VoxelIdx, pos1: VoxelIdx, cells: &mut Vec<VoxelIdx>) {
     let dx = (pos1[0] - pos0[0]) as f32;
     let dy = (pos1[1] - pos0[1]) as f32;
@@ -25,7 +27,7 @@ pub fn line_cells(pos0: VoxelIdx, pos1: VoxelIdx, cells: &mut Vec<VoxelIdx>) {
 }
 
 pub fn extrude_at<V: Voxel>(v: &mut V, zrange: Range<i32>, cells: &[VoxelIdx], n: usize) -> usize {
-    if false {
+    if true {
         extrude_at_queue(v, zrange, cells, n)
     } else {
         extrude_at_deque(v, zrange, cells, n)
@@ -60,9 +62,6 @@ pub fn extrude_at_queue<V: Voxel>(
 
     let mut candidates = BinaryHeap::new();
     let mut visited = ChunkedVoxel::default();
-
-    const MAX_DIST_AXIS: usize = (LAYER_HEIGHT / UNIT) as usize;
-    const MAX_DIST_SQ: usize = MAX_DIST_AXIS * MAX_DIST_AXIS * MAX_DIST_AXIS * 4;
 
     for pos in cells {
         let pos = *pos;
@@ -110,7 +109,7 @@ pub fn extrude_at_queue<V: Voxel>(
 
             let delta = src - next;
             let dist = delta.magnitude_squared();
-            if dist > MAX_DIST_SQ {
+            if dist > MAX_DIST {
                 continue;
             }
             candidates.push(HeapItem {
@@ -147,8 +146,6 @@ pub fn extrude_at_deque<V: Voxel>(
     let mut candidates = VecDeque::with_capacity(1024 * 8);
     let mut visited = ChunkedVoxel::default();
 
-    const MAX_DIST: usize = (NOZZLE_SIZE / UNIT) as usize;
-
     for pos in cells {
         visited.add(*pos);
         candidates.push_back(HeapItem {
@@ -170,12 +167,12 @@ pub fn extrude_at_deque<V: Voxel>(
         }
 
         let directions = [
+            [0, 0, 1],
+            [0, 0, -1],
             [1, 0, 0],
             [-1, 0, 0],
             [0, 1, 0],
             [0, -1, 0],
-            [0, 0, 1],
-            [0, 0, -1],
         ];
 
         for dir in directions {
