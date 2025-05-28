@@ -271,7 +271,7 @@ impl BGMCell {
     }
 }
 
-const BITS: u64 = 21;
+const BITS: u64 = 16;
 const MASK: u64 = (1 << BITS) - 1;
 pub fn chunk_idx(coord: VoxelIdx) -> u64 {
     let x = coord.idx[0].div_euclid(CELL_SIZE as i32);
