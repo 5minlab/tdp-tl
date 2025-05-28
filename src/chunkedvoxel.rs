@@ -47,7 +47,7 @@ impl ChunkedBase {
     }
 }
 
-fn write_cell<W: std::io::Write>(idx: u64, cell: &BGMCell, mut writer: W) -> Result<()> {
+fn write_cell0<W: std::io::Write>(idx: u64, cell: &BGMCell, mut writer: W) -> Result<()> {
     use byteorder::{LittleEndian, WriteBytesExt};
 
     let base = chunk_base(idx);
@@ -73,11 +73,28 @@ fn write_cell<W: std::io::Write>(idx: u64, cell: &BGMCell, mut writer: W) -> Res
     Ok(())
 }
 
+fn write_cell<W: std::io::Write>(
+    idx: u64,
+    cell: &BGMCell,
+    writer: W,
+    ro: WriteOptions,
+) -> Result<()> {
+    match ro {
+        WriteOptions::None => write_cell0(idx, cell, writer),
+        WriteOptions::Simplify => {
+            let mut cell = cell.clone();
+            cell.simplify();
+            write_cell0(idx, &cell, writer)
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ChunkedVoxel {
     base: ChunkedBase,
     models: HashMap<u64, Rc<Model>>,
 
+    ro: WriteOptions,
     dirty: HashSet<VoxelIdx>,
     model_cache: HashMap<u64, Rc<Model>>,
 }
@@ -109,7 +126,12 @@ impl StreamingVoxel for ChunkedVoxel {
         writer.write_u32::<LittleEndian>(indices.len() as u32)?;
         for idx in indices.iter() {
             let idx = *idx;
-            write_cell(idx, self.base.chunks.get(&idx).unwrap(), &mut writer)?;
+            write_cell(
+                idx,
+                self.base.chunks.get(&idx).unwrap(),
+                &mut writer,
+                self.ro,
+            )?;
         }
 
         Ok(())
@@ -176,7 +198,7 @@ impl Voxel for ChunkedVoxel {
 
         writer.write_u32::<LittleEndian>(self.base.chunks.len() as u32)?;
         for (&idx, cell) in self.base.chunks.iter() {
-            write_cell(idx, cell, &mut writer)?;
+            write_cell(idx, cell, &mut writer, self.ro)?;
         }
 
         Ok(())
@@ -191,5 +213,13 @@ impl Voxel for ChunkedVoxel {
         out.len()
         */
         0
+    }
+
+    fn set_options(&mut self, options: WriteOptions) {
+        if options != self.ro {
+            self.ro = options;
+            self.model_cache.clear();
+            self.dirty.clear();
+        }
     }
 }

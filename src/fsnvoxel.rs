@@ -47,6 +47,7 @@ fn write_model<W: std::io::Write>(model: &Model, mut writer: W) -> Result<()> {
 pub struct FSNVoxel {
     base: ChunkedBase,
 
+    ro: WriteOptions,
     dirty: AHashSet<VoxelIdx>,
     model_cache: AHashMap<u64, Rc<Model>>,
 }
@@ -105,7 +106,7 @@ impl FSNVoxel {
         let mut mesh = SurfaceNetsBuffer::default();
         surface_nets(&sdf, &ChunkShape {}, [0; 3], [33; 3], &mut mesh);
 
-        let indices = if false {
+        let indices = if self.ro == WriteOptions::None {
             mesh.indices.clone()
         } else {
             let data: &[u8] = unsafe {
@@ -201,8 +202,6 @@ impl StreamingVoxel for FSNVoxel {
     }
 }
 
-
-
 impl Voxel for FSNVoxel {
     fn ranges(&self) -> usize {
         0
@@ -292,5 +291,13 @@ impl Voxel for FSNVoxel {
         len
             */
         0
+    }
+
+    fn set_options(&mut self, options: WriteOptions) {
+        if options != self.ro {
+            self.ro = options;
+            self.model_cache.clear();
+            self.dirty.clear();
+        }
     }
 }

@@ -87,6 +87,14 @@ const FPS: usize = 30;
 // tunables
 const INJECT_OFFSET_Z: f32 = 0.0; // LAYER_HEIGHT / 2.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WriteOptions {
+    #[default]
+    None,
+
+    Simplify,
+}
+
 pub trait Voxel: Default {
     fn ranges(&self) -> usize;
     fn bounding_box(&self) -> &BoundingBox;
@@ -100,6 +108,8 @@ pub trait Voxel: Default {
     fn debug1(&mut self) -> usize {
         1
     }
+
+    fn set_options(&mut self, _options: WriteOptions) {}
 }
 
 pub trait StreamingVoxel: Voxel {
@@ -718,6 +728,10 @@ mod wrapper {
             let _ = self.runner.state.mv.write_dirty(&mut self.buf);
             self.buf.len() as u64
         }
+
+        pub fn set_write_options(&mut self, options: WriteOptions) {
+            self.runner.state.mv.set_options(options);
+        }
     }
 
     pub type RunnerWrapper = Arc<RwLock<Option<FFIRunner<FFIVoxel>>>>;
@@ -792,5 +806,19 @@ pub unsafe extern "C" fn runner_retrieve(ptr: *const u8, buf: *mut u8, len: u64)
         }
         let dst: &mut [u8] = std::slice::from_raw_parts_mut(buf, len as usize);
         dst.copy_from_slice(&runner.buf);
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_set_write_options(ptr: *const u8, flags: u32) {
+    with_wrapper(ptr as usize, |runner| {
+        let options = match flags {
+            0 => WriteOptions::None,
+            1 => WriteOptions::Simplify,
+            _ => {
+                return;
+            }
+        };
+        runner.set_write_options(options);
     });
 }
