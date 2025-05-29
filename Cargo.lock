@@ -690,8 +690,6 @@ dependencies = [
 [[package]]
 name = "nom-gcode"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1599aeb4b8be6de89c04142a42168ccb39d0df7b1020db3e7d2e0f19d339bd36"
 dependencies = [
  "nom",
  "thiserror 1.0.69",

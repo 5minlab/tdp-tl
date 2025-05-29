@@ -18,7 +18,7 @@ isosurface = "0.1.0-alpha.0"
 log = "0.4.27"
 mesh-tools = "0.2.0"
 nalgebra = "0.31"
-nom-gcode = "0.1.1"
+nom-gcode = { path = "./nom-gcode" }
 ordslice = "0.3.0"
 rangemap = "1.5.1"
 rayon = "1.10.0"

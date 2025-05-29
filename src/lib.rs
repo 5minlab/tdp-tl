@@ -562,6 +562,7 @@ pub fn generate_gcode<V: Voxel + Default>(
 
     if true {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
+        info!("meta: {:?}", runner.meta);
         while !runner.step(1.0 / FPS as f32) {
             runner.state.mv.debug1();
         }
@@ -586,6 +587,9 @@ pub fn generate_gcode<V: Voxel + Default>(
                 GCode1::Coord(coord) => {
                     state.handle_gcode(coord);
                 }
+                _ => {
+                    //
+                }
             }
         }
     }
@@ -606,6 +610,7 @@ pub fn generate_gcode<V: Voxel + Default>(
 }
 
 struct ExtrudeRunner<V: Voxel> {
+    pub meta: GCodeMeta,
     pub state: ExtrudeState<V>,
 
     pendings: Vec<(usize, GCode1)>,
@@ -613,9 +618,23 @@ struct ExtrudeRunner<V: Voxel> {
 
 impl<V: Voxel + Default> ExtrudeRunner<V> {
     fn new(mut pendings: Vec<(usize, GCode1)>) -> Self {
+        let meta = {
+            let comments = pendings
+                .iter()
+                .filter_map(|(_, code)| {
+                    if let GCode1::TypedComment(prefix, value) = code {
+                        Some((prefix.as_str(), value.as_str()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            GCodeMeta::from_comments(&comments)
+        };
         pendings.reverse();
 
         Self {
+            meta,
             state: ExtrudeState::default(),
             pendings,
         }
@@ -636,26 +655,8 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         false
     }
 
-    fn step0(&mut self, dt: f32) -> (bool, f32) {
-        let (line, cur) = match self.pendings.pop() {
-            Some((line, GCode1::Coord(cur))) => (line, cur),
-            Some((_, GCode1::Layer(layer_idx))) => {
-                info!("layer {}", layer_idx);
-                /*
-                if layer_idx > 0 && layer_idx % 10 == 0 {
-                    let postfix = format!("{:03}", layer_idx);
-                    self.state.export(out_filename, &postfix, true).unwrap();
-                }
-                */
-                return (false, 0.0);
-            }
-            None => return (true, 0.0),
-        };
-        if cur.major == 92 {
-            self.state.e = cur.e.unwrap_or(self.state.e);
-            return (false, 0.0);
-        }
-
+    // G0, G1, G2, G3
+    fn g_0_1(&mut self, cur: GCode1Coord, dt: f32) -> (Option<GCode1Coord>, f32) {
         let prev = GCode1Coord {
             major: cur.major,
             x: Some(self.state.pos[0]),
@@ -675,14 +676,14 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
 
         let len = diff.magnitude();
         if len < std::f32::EPSILON {
-            return (false, 0f32);
+            return (None, 0f32);
         }
 
         let step_len = next.f.unwrap_or(1800.0) / 60.0 * dt;
         if step_len >= len {
             // no need to split
             self.state.handle_gcode(next);
-            return (false, dt * len / step_len);
+            return (None, dt * len / step_len);
         }
 
         let dx = dx * step_len / len;
@@ -696,9 +697,52 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         next.e = Some(prev.e.unwrap_or(0.0) + de);
         self.state.handle_gcode(next);
 
-        self.pendings.push((line, GCode1::Coord(cur)));
+        (Some(cur), dt)
+    }
 
-        (false, dt)
+    fn step0(&mut self, dt: f32) -> (bool, f32) {
+        match self.pendings.pop() {
+            Some((line, GCode1::Coord(cur))) => {
+                if cur.major == 92 {
+                    if let Some(x) = cur.x {
+                        self.state.pos[0] = x;
+                    }
+                    if let Some(y) = cur.y {
+                        self.state.pos[1] = y;
+                    }
+                    if let Some(z) = cur.z {
+                        self.state.pos[2] = z;
+                    }
+                    if let Some(e) = cur.e {
+                        self.state.e = e;
+                    }
+
+                    (false, 0.0)
+                } else if [0, 1, 2, 3].contains(&cur.major) {
+                    match self.g_0_1(cur, dt) {
+                        (Some(next), step_dt) => {
+                            self.pendings.push((line, GCode1::Coord(next)));
+                            (false, step_dt)
+                        }
+                        (None, step_dt) => (false, step_dt),
+                    }
+                } else {
+                    (false, 0f32)
+                }
+            }
+            Some((_, GCode1::Layer(layer_idx))) => {
+                info!("layer {}", layer_idx);
+                /*
+                if layer_idx > 0 && layer_idx % 10 == 0 {
+                    let postfix = format!("{:03}", layer_idx);
+                    self.state.export(out_filename, &postfix, true).unwrap();
+                }
+                */
+                (false, 0.0)
+            }
+            Some(_) => (false, 0.0),
+            None => (true, 0.0),
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 use anyhow::Result;
+use nalgebra::Vector3;
 use nom_gcode::{GCodeLine::*, Mnemonic};
 
 pub enum GCode1 {
     Layer(usize),
+    TypedComment(String, String),
     Coord(GCode1Coord),
 }
 
@@ -67,6 +69,8 @@ impl GCode1Coord {
     }
 }
 
+const PREFIX_LAYER: &'static str = "LAYER:";
+
 pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
     let gcode = std::fs::read_to_string(filename)?;
     let mut out = Vec::new();
@@ -75,19 +79,21 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
         let parsed = nom_gcode::parse_gcode(&line)?;
         match parsed {
             (_, Some(Comment(comment))) => {
-                let prefix = "LAYER:";
-                if !comment.0.starts_with(prefix) {
-                    continue;
+                if comment.0.starts_with(PREFIX_LAYER) {
+                    let layer_idx = comment.0[PREFIX_LAYER.len()..].parse::<usize>()?;
+                    out.push((number, GCode1::Layer(layer_idx)));
+                } else {
+                    let mut parts = comment.0.splitn(2, ':');
+                    let prefix = parts.next().unwrap_or("");
+                    let value = parts.next().unwrap_or("");
+                    out.push((
+                        number,
+                        GCode1::TypedComment(prefix.to_string(), value.to_string()),
+                    ));
                 }
-                let layer_idx = comment.0[prefix.len()..].parse::<usize>()?;
-                out.push((number, GCode1::Layer(layer_idx)));
             }
             (_, Some(GCode(code))) => {
-                if code.mnemonic != Mnemonic::General {
-                    continue;
-                }
-
-                if [0, 1, 92].contains(&code.major) {
+                if code.mnemonic == Mnemonic::General && [0, 1, 2, 3, 92].contains(&code.major) {
                     out.push((number, GCode1::Coord(GCode1Coord::from_argument(code))));
                 }
             }
@@ -96,4 +102,123 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
     }
 
     Ok(out)
+}
+
+#[derive(Debug)]
+pub struct GCodeMeta {
+    pub flavor: Option<String>,
+    pub time: Option<f32>,
+    pub filament_used: Option<f32>,
+    pub layer_height: Option<f32>,
+    pub bounding_box: Option<(Vector3<f32>, Vector3<f32>)>,
+    pub target_machine: Option<String>,
+    pub layer_count: Option<usize>,
+}
+
+impl GCodeMeta {
+    pub fn from_comments(comments: &[(&str, &str)]) -> Self {
+        let mut time = None;
+        let mut flavor = None;
+        let mut filament_used = None;
+        let mut layer_height = None;
+        let mut target_machine = None;
+        let mut layer_count = None;
+
+        let mut minx = None;
+        let mut miny = None;
+        let mut minz = None;
+        let mut maxx = None;
+        let mut maxy = None;
+        let mut maxz = None;
+
+        for (prefix, value) in comments {
+            match *prefix {
+                "FLAVOR" => {
+                    if !value.is_empty() {
+                        flavor = Some(value.to_string());
+                    }
+                }
+                "TIME" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        time = Some(v);
+                    }
+                }
+                "Filament used" => {
+                    if value.trim().ends_with("m") {
+                        let value = value.trim().trim_end_matches('m');
+                        if let Ok(v) = value.parse::<f32>() {
+                            // convert to mm
+                            filament_used = Some(v * 1000.0);
+                        }
+                    }
+                }
+                "Layer height" => {
+                    if let Ok(v) = value.trim().parse::<f32>() {
+                        layer_height = Some(v);
+                    }
+                }
+                "MINX" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        minx = Some(v);
+                    }
+                }
+                "MINY" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        miny = Some(v);
+                    }
+                }
+                "MINZ" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        minz = Some(v);
+                    }
+                }
+                "MAXX" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        maxx = Some(v);
+                    }
+                }
+                "MAXY" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        maxy = Some(v);
+                    }
+                }
+                "MAXZ" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        maxz = Some(v);
+                    }
+                }
+                "TARGET_MACHINE.NAME" => {
+                    target_machine = Some(value.to_string());
+                }
+                "LAYER_COUNT" => {
+                    if let Ok(v) = value.parse::<usize>() {
+                        layer_count = Some(v);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let bounding_box =
+            if let (Some(minx), Some(miny), Some(minz), Some(maxx), Some(maxy), Some(maxz)) =
+                (minx, miny, minz, maxx, maxy, maxz)
+            {
+                Some((
+                    Vector3::new(minx, miny, minz),
+                    Vector3::new(maxx, maxy, maxz),
+                ))
+            } else {
+                None
+            };
+
+        Self {
+            flavor,
+            time,
+            filament_used,
+            layer_height,
+            bounding_box,
+            target_machine,
+            layer_count,
+        }
+    }
 }
