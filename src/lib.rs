@@ -653,6 +653,10 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         }
     }
 
+    fn pos(&self) -> Vector3<f32> {
+        self.state.pos + self.state.home
+    }
+
     fn step(&mut self, mut dt: f32) -> bool {
         while dt > std::f32::EPSILON {
             match self.step0(dt) {
@@ -848,9 +852,10 @@ pub unsafe extern "C" fn runner_step(ptr: *const u8, dt: f32, pos: *mut f32) -> 
         ret = runner.step(dt);
 
         let dst: &mut [f32] = std::slice::from_raw_parts_mut(pos, 3);
-        dst[0] = runner.runner.state.pos[0];
-        dst[1] = runner.runner.state.pos[1];
-        dst[2] = runner.runner.state.pos[2];
+        let pos = &runner.runner.pos();
+        dst[0] = pos[0];
+        dst[1] = pos[1];
+        dst[2] = pos[2];
     });
     ret
 }
