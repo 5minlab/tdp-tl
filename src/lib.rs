@@ -763,7 +763,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
     }
 }
 
-type FFIVoxel = FSNVoxel;
+type FFIVoxel = ChunkedVoxel;
 
 mod wrapper {
     use super::*;
