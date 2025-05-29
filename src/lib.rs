@@ -340,6 +340,7 @@ pub fn model_serialize(
 struct ExtrudeState<V: Voxel + Default> {
     mv: V,
 
+    home: Vector3<f32>,
     pos: Vector3<f32>,
     f: f32,
     e: f32,
@@ -356,6 +357,7 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
         let last_sw = Stopwatch::start_new();
         Self {
             mv: V::default(),
+            home: Vector3::new(0.0, 0.0, 0.0),
             pos: Vector3::new(0.0, 0.0, 0.0),
             f: 0.0,
             e: 0.0,
@@ -472,7 +474,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         let z = intpos(dst[2]);
         let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
 
-        let oz = Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
+        let oz = self.home + Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
         let offsets = [
             oz + Vector3::new(0.0, 0.0, 0.0),
             oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 8.0,
@@ -564,7 +566,7 @@ pub fn generate_gcode<V: Voxel + Default>(
         let mut runner = ExtrudeRunner::<V>::new(parsed);
         info!("meta: {:?}", runner.meta);
         while !runner.step(1.0 / FPS as f32) {
-            runner.state.mv.debug1();
+            // runner.state.mv.debug1();
         }
         state = runner.state;
     } else {
@@ -631,11 +633,22 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
                 .collect::<Vec<_>>();
             GCodeMeta::from_comments(&comments)
         };
+        let mut state = ExtrudeState::<V>::default();
+
+        if let Some((min, max)) = meta.bounding_box {
+            // check if coordinate space is center-zero
+
+            let center = (min + max) / 2.0;
+            let extents = (max - min) / 2.0;
+            if center.x < extents.x / 2.0 {
+                state.home = Vector3::new(110.0, 110.0, 0.0);
+            }
+        }
         pendings.reverse();
 
         Self {
             meta,
-            state: ExtrudeState::default(),
+            state,
             pendings,
         }
     }
@@ -718,7 +731,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
                     }
 
                     (false, 0.0)
-                } else if [0, 1, 2, 3].contains(&cur.major) {
+                } else if [0, 1].contains(&cur.major) {
                     match self.g_0_1(cur, dt) {
                         (Some(next), step_dt) => {
                             self.pendings.push((line, GCode1::Coord(next)));
