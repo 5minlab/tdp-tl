@@ -178,7 +178,6 @@ impl StreamingVoxel for FSNVoxel {
         use byteorder::{LittleEndian, WriteBytesExt};
 
         writer.write_u32::<LittleEndian>(1)?;
-        writer.write_f32::<LittleEndian>(UNIT)?;
 
         let dirty = std::mem::take(&mut self.dirty);
         let mut indices = Vec::new();
@@ -261,18 +260,12 @@ impl Voxel for FSNVoxel {
         models
     }
 
-    fn debug0(&mut self, filename: &str) -> Result<()> {
+    fn write_binary<W: std::io::Write>(&mut self, mut writer: W) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
-        let writer = std::fs::File::create(filename)?;
-        let mut writer = std::io::BufWriter::new(writer);
-
-        // type
         writer.write_u32::<LittleEndian>(1)?;
-        writer.write_f32::<LittleEndian>(UNIT)?;
 
         let models = self.to_model();
-
         writer.write_u32::<LittleEndian>(models.len() as u32)?;
         for model in models {
             write_model(&model, &mut writer)?;

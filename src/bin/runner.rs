@@ -233,6 +233,7 @@ fn generate_extrude(out: &str) -> Result<()> {
         extrude_at(
             &mut mv,
             -5..5,
+            10,
             &[p],
             (extrude_per_dist * dist_per_step) as usize,
         );

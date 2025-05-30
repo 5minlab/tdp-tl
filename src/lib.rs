@@ -65,27 +65,51 @@ impl BoundingBox {
     }
 }
 
-// unit: 0.04mm, layer thickness: 0.2mm, nozzle size: 0.4mm
-const UNIT: f32 = LAYER_HEIGHT / 2.0;
+// internal use only
+const FPS: usize = 30;
 
-// block volume in cubic millimeters
-const BLOCK_VOLUME: f32 = UNIT * UNIT * UNIT;
 const FILAMENT_DIAMETER: f32 = 1.75f32;
 const FILAMENT_CROSS_SECION: f32 =
     0.25f32 * std::f32::consts::PI * FILAMENT_DIAMETER * FILAMENT_DIAMETER;
 
-// unit: millimeters
-// TODO: extract from gcode
-const LAYER_HEIGHT: f32 = 0.2f32;
-const Z_OFFSET: i32 = (LAYER_HEIGHT / UNIT) as i32;
-const Z_OFFSET_UP: i32 = 1;
-
 const NOZZLE_SIZE: f32 = 0.4f32;
 
-const FPS: usize = 30;
+pub struct Parameters {
+    pub unit: f32,
+    pub layer_height: f32,
+}
 
-// tunables
-const INJECT_OFFSET_Z: f32 = 0.0; // LAYER_HEIGHT / 2.0;
+impl Default for Parameters {
+    fn default() -> Self {
+        let layer_height = 0.2f32;
+        Self {
+            unit: layer_height / 2.0,
+            layer_height,
+        }
+    }
+}
+
+impl Parameters {
+    fn intpos(&self, v: f32) -> i32 {
+        (v / self.unit).round() as i32
+    }
+
+    fn to_intpos(&self, pos: Vector3<f32>) -> VoxelIdx {
+        [
+            self.intpos(pos[0]),
+            self.intpos(pos[1]),
+            self.intpos(pos[2]),
+        ]
+        .into()
+    }
+
+    fn write<W: std::io::Write>(&self, mut writer: W) -> Result<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+
+        writer.write_f32::<LittleEndian>(self.unit)?;
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum WriteOptions {
@@ -102,9 +126,10 @@ pub trait Voxel: Default {
     fn add(&mut self, coord: VoxelIdx) -> bool;
     fn to_model(&mut self) -> Vec<Rc<Model>>;
 
-    fn debug0(&mut self, _filename: &str) -> Result<()> {
+    fn write_binary<W: std::io::Write>(&mut self, _writer: W) -> Result<()> {
         Ok(())
     }
+
     fn debug1(&mut self) -> usize {
         1
     }
@@ -339,6 +364,7 @@ pub fn model_serialize(
 
 struct ExtrudeState<V: Voxel + Default> {
     mv: V,
+    params: Parameters,
 
     home: Vector3<f32>,
     pos: Vector3<f32>,
@@ -357,6 +383,8 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
         let last_sw = Stopwatch::start_new();
         Self {
             mv: V::default(),
+            params: Parameters::default(),
+
             home: Vector3::new(0.0, 0.0, 0.0),
             pos: Vector3::new(0.0, 0.0, 0.0),
             f: 0.0,
@@ -369,14 +397,6 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
             last_sw,
         }
     }
-}
-
-fn intpos(v: f32) -> i32 {
-    (v / UNIT).round() as i32
-}
-
-fn to_intpos(pos: Vector3<f32>) -> VoxelIdx {
-    [intpos(pos[0]), intpos(pos[1]), intpos(pos[2])].into()
 }
 
 impl<V: Voxel + Default> ExtrudeState<V> {
@@ -396,10 +416,15 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         let out_filename = if true {
             let filename = format!("{}/gcode_{}.glb", out_filename, postfix);
-            model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], UNIT)?;
+            model_serialize_gltf(&model, &filename, [-90f32, -90f32, 0f32], self.params.unit)?;
 
-            let filename1 = format!("{}/gcode_{}.bin", out_filename, postfix);
-            self.mv.debug0(&filename1)?;
+            {
+                let filename1 = format!("{}/gcode_{}.bin", out_filename, postfix);
+                let file = File::create(&filename1)?;
+                let mut writer = std::io::BufWriter::new(file);
+                self.params.write(&mut writer)?;
+                self.mv.write_binary(&mut writer)?;
+            }
             filename
         } else {
             let filename = format!("{}/gcode_{}.obj", out_filename, postfix);
@@ -423,6 +448,14 @@ impl<V: Voxel + Default> ExtrudeState<V> {
             self.e = code.e.unwrap_or(self.e);
             return 0;
         }
+
+        // unit: millimeters
+        // TODO: extract from gcode
+        let z_offset: i32 = (self.params.layer_height / self.params.unit) as i32;
+        let z_offset_up: i32 = 1;
+
+        // tunables
+        let inject_offset_z: f32 = 0.0; // LAYER_HEIGHT / 2.0;
 
         let mut dst = self.pos;
         let mut dst_e = self.e;
@@ -471,10 +504,10 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         // no inter-layer extrusion
         assert!(dir.z <= 0.0, "delta_e={}, dir={:?}", delta_e, dir);
 
-        let z = intpos(dst[2]);
-        let zrange = (z - Z_OFFSET)..(z + Z_OFFSET_UP);
+        let z = self.params.intpos(dst[2]);
+        let zrange = (z - z_offset)..(z + z_offset_up);
 
-        let oz = self.home + Vector3::new(0.0, 0.0, -INJECT_OFFSET_Z);
+        let oz = self.home + Vector3::new(0.0, 0.0, -inject_offset_z);
         let offsets = [
             oz + Vector3::new(0.0, 0.0, 0.0),
             oz + Vector3::new(dir.y, -dir.x, 0.0) * NOZZLE_SIZE / 8.0,
@@ -486,8 +519,8 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         let gen_cells = |from: Vector3<f32>, to: Vector3<f32>| {
             let mut cells = vec![];
             for offset in &offsets {
-                let pos = to_intpos(from + offset);
-                let next_pos = to_intpos(to + offset);
+                let pos = self.params.to_intpos(from + offset);
+                let next_pos = self.params.to_intpos(to + offset);
                 line_cells(pos, next_pos, &mut cells);
             }
             cells
@@ -497,8 +530,11 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         // with 1.75mm filament, calculate volume, in millimeters
         let filament_volume = delta_e * FILAMENT_CROSS_SECION;
 
+        // block volume in cubic millimeters
+        let block_volume = self.params.unit.powi(3);
+
         // TODO: accurate volume calculation
-        let total_blocks = filament_volume / BLOCK_VOLUME;
+        let total_blocks = filament_volume / block_volume;
         let mut blocks = total_blocks as usize;
 
         debug!(
@@ -511,6 +547,9 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         );
 
         let cursor = self.pos;
+
+        let max_dist = (NOZZLE_SIZE * 2.0 / self.params.unit) as usize;
+
         // 1800mm/min, 30mm/s, 0.5mm/frame
         /*
         let step_size = self.f / FPS as f32 / 60.0;
@@ -538,7 +577,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         // last segment
         if blocks > 0 {
             let cells = gen_cells(cursor, dst);
-            let extrudeed = extrude_at(&mut self.mv, zrange.clone(), &cells, blocks);
+            let extrudeed = extrude_at(&mut self.mv, zrange.clone(), max_dist, &cells, blocks);
             if extrudeed != blocks {
                 debug!("extrudeed != blocks, skipping: {} != {}", extrudeed, blocks);
             }
@@ -786,6 +825,8 @@ mod wrapper {
                 return 0;
             }
             self.buf.clear();
+
+            let _ = self.runner.state.params.write(&mut self.buf);
             let _ = self.runner.state.mv.write_dirty(&mut self.buf);
             self.buf.len() as u64
         }
@@ -868,6 +909,13 @@ pub unsafe extern "C" fn runner_retrieve(ptr: *const u8, buf: *mut u8, len: u64)
         }
         let dst: &mut [u8] = std::slice::from_raw_parts_mut(buf, len as usize);
         dst.copy_from_slice(&runner.buf);
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn runner_set_params(ptr: *const u8, unit: f32) {
+    with_wrapper(ptr as usize, |runner| {
+        runner.runner.state.params.unit = unit;
     });
 }
 

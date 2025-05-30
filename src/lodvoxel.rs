@@ -1,4 +1,4 @@
-use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
+use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use super::cell::*;
 use super::chunkedvoxel::ChunkedBase;
@@ -113,15 +113,10 @@ impl Voxel for LodVoxel {
         models
     }
 
-    fn debug0(&mut self, filename: &str) -> Result<()> {
+    fn write_binary<W: std::io::Write>(&mut self, mut writer: W) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
-        let writer = std::fs::File::create(filename)?;
-        let mut writer = std::io::BufWriter::new(writer);
-
-        // type
         writer.write_u32::<LittleEndian>(1)?;
-        writer.write_f32::<LittleEndian>(UNIT)?;
 
         writer.write_u32::<LittleEndian>(self.base.chunks.len() as u32)?;
         for (&idx, _cell) in self.base.chunks.iter() {

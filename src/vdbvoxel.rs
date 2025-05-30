@@ -1,4 +1,4 @@
-use super::{BoundingBox, Model, Voxel, VoxelIdx, UNIT};
+use super::{BoundingBox, Model, Voxel, VoxelIdx};
 
 use anyhow::Result;
 use nanovdb::*;
@@ -12,7 +12,6 @@ use transvoxel::voxel_source::*;
 pub struct VDBVoxel {
     grid: BuildGrid,
     // grid2: BuildGrid,
-
     bb: BoundingBox,
 }
 
@@ -159,17 +158,14 @@ impl Voxel for VDBVoxel {
         models
     }
 
-    fn debug0(&mut self, filename: &str) -> Result<()> {
+    fn write_binary<W: std::io::Write>(&mut self, mut writer: W) -> Result<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
 
         let grid = &self.grid;
         let scaleshift = 0;
-        let writer = std::fs::File::create(filename)?;
-        let mut writer = std::io::BufWriter::new(writer);
 
         // type
         writer.write_u32::<LittleEndian>(1)?;
-        writer.write_f32::<LittleEndian>(UNIT)?;
 
         let count = grid.iter2_init();
         writer.write_u32::<LittleEndian>(count as u32)?;
