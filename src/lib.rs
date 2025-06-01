@@ -66,7 +66,7 @@ impl BoundingBox {
 }
 
 // internal use only
-const FPS: usize = 30;
+const FPS: usize = 60;
 
 const FILAMENT_DIAMETER: f32 = 1.75f32;
 const FILAMENT_CROSS_SECION: f32 =
@@ -77,6 +77,10 @@ const NOZZLE_SIZE: f32 = 0.4f32;
 pub struct Parameters {
     pub unit: f32,
     pub layer_height: f32,
+
+    // simulation parameters
+    pub e_delta_min: f32,
+    pub e_alpha: f32,
 }
 
 impl Default for Parameters {
@@ -85,6 +89,9 @@ impl Default for Parameters {
         Self {
             unit: layer_height / 2.0,
             layer_height,
+
+            e_delta_min: 0.01,
+            e_alpha: 0.8,
         }
     }
 }
@@ -369,7 +376,11 @@ struct ExtrudeState<V: Voxel + Default> {
     home: Vector3<f32>,
     pos: Vector3<f32>,
     f: f32,
+
+    // delayed E
+    e_delay: f32,
     e: f32,
+    e_top: f32,
 
     frames: usize,
     dirtycount: usize,
@@ -388,7 +399,9 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
             home: Vector3::new(0.0, 0.0, 0.0),
             pos: Vector3::new(0.0, 0.0, 0.0),
             f: 0.0,
+            e_delay: 0.0,
             e: 0.0,
+            e_top: 0.0,
 
             frames: 0,
             dirtycount: 0,
@@ -445,7 +458,13 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
     fn handle_gcode(&mut self, code: GCode1Coord) -> usize {
         if code.major == 92 {
-            self.e = code.e.unwrap_or(self.e);
+            let e = code.e.unwrap_or(self.e);
+            let e_delta = e - self.e;
+
+            self.e += e_delta;
+            self.e_delay += e_delta;
+            self.e_top += e_delta;
+
             return 0;
         }
 
@@ -479,33 +498,41 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         }
 
         self.f = target_f;
-        if dst_e <= self.e {
-            self.pos = dst;
-            return 0;
-        }
-
         let diff = dst - self.pos;
         // in millimeters
         let len = diff.magnitude();
-        if len < std::f32::EPSILON {
-            return 0;
-        }
         let dir = diff.normalize();
 
         let seconds = len / (self.f / 60.0);
         self.wall_seconds += seconds;
 
-        // in centimeters
-        let delta_e = dst_e - self.e;
-        if delta_e <= std::f32::EPSILON {
+        // pressure delay
+        // delta_e, in centimeters
+        let e_delta = {
+            // First-Order Low-Pass Filter
+            // let alpha = (self.params.e_alpha * seconds).clamp(0.0, 1.0);
+            let alpha = self.params.e_alpha; // * seconds).clamp(0.0, 1.0);
+            let e_delay = self.e_delay * (1.0 - alpha) + dst_e * alpha;
+            let e_delta = e_delay - self.e_top;
+
+            self.e = dst_e;
+            self.e_delay = e_delay;
+            self.e_top = self.e_top.max(e_delay);
+            e_delta
+        };
+
+        if e_delta <= 0f32 {
+            self.pos = dst;
             return 0;
         }
 
-        // no inter-layer extrusion
-        assert!(dir.z <= 0.0, "delta_e={}, dir={:?}", delta_e, dir);
-
-        let z = self.params.intpos(dst[2]);
-        let zrange = (z - z_offset)..(z + z_offset_up);
+        let zrange = {
+            let z0 = self.params.intpos(self.pos[2]);
+            let z1 = self.params.intpos(dst[2]);
+            let zmin = z0.min(z1);
+            let zmax = z0.max(z1);
+            (zmin - z_offset)..(zmax + z_offset_up)
+        };
 
         let oz = self.home + Vector3::new(0.0, 0.0, -inject_offset_z);
         let offsets = [
@@ -528,7 +555,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         // flow rate calculation
         // with 1.75mm filament, calculate volume, in millimeters
-        let filament_volume = delta_e * FILAMENT_CROSS_SECION;
+        let filament_volume = e_delta * FILAMENT_CROSS_SECION;
 
         // block volume in cubic millimeters
         let block_volume = self.params.unit.powi(3);
@@ -548,7 +575,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
 
         let cursor = self.pos;
 
-        let max_dist = (NOZZLE_SIZE * 2.0 / self.params.unit) as usize;
+        let max_dist = (NOZZLE_SIZE * 4.0 / self.params.unit) as usize;
 
         // 1800mm/min, 30mm/s, 0.5mm/frame
         /*
@@ -585,7 +612,6 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         }
 
         self.pos = dst;
-        self.e = dst_e;
         blocks
     }
 }
@@ -731,10 +757,6 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         let diff = Vector3::new(dx, dy, dz);
 
         let len = diff.magnitude();
-        if len < std::f32::EPSILON {
-            return (None, 0f32);
-        }
-
         let step_len = next.f.unwrap_or(1800.0) / 60.0 * dt;
         if step_len >= len {
             // no need to split
