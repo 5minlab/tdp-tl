@@ -387,6 +387,8 @@ struct ExtrudeState<V: Voxel + Default> {
 
     wall_seconds: f32,
     last_sw: Stopwatch,
+
+    dir: Vector3<f32>,
 }
 
 impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
@@ -408,6 +410,8 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
 
             wall_seconds: 0.0,
             last_sw,
+
+            dir: Vector3::new(0.0, 0.0, 0.0),
         }
     }
 }
@@ -502,6 +506,7 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         // in millimeters
         let len = diff.magnitude();
         let dir = diff.normalize();
+        self.dir = dir;
 
         let seconds = len / (self.f / 60.0);
         self.wall_seconds += seconds;
@@ -722,6 +727,10 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         self.state.pos + self.state.home
     }
 
+    fn speed(&self) -> Vector3<f32> {
+        self.state.dir * (self.state.f / 60.0)
+    }
+
     fn step(&mut self, mut dt: f32) -> bool {
         while dt > std::f32::EPSILON {
             match self.step0(dt) {
@@ -909,16 +918,23 @@ pub unsafe extern "C" fn runner_delete(ptr: *const u8) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn runner_step(ptr: *const u8, dt: f32, pos: *mut f32) -> u64 {
+pub unsafe extern "C" fn runner_step(ptr: *const u8, dt: f32, pos: *mut f32, speed: *mut f32) -> u64 {
+    let dst_pos: &mut [f32] = std::slice::from_raw_parts_mut(pos, 3);
+    let dst_speed: &mut [f32] = std::slice::from_raw_parts_mut(speed, 3);
+
     let mut ret = 0u64;
     with_wrapper(ptr as usize, |runner| {
         ret = runner.step(dt);
 
-        let dst: &mut [f32] = std::slice::from_raw_parts_mut(pos, 3);
         let pos = &runner.runner.pos();
-        dst[0] = pos[0];
-        dst[1] = pos[1];
-        dst[2] = pos[2];
+        dst_pos[0] = pos[0];
+        dst_pos[1] = pos[1];
+        dst_pos[2] = pos[2];
+
+        let dir = &runner.runner.speed();
+        dst_speed[0] = dir[0];
+        dst_speed[1] = dir[1];
+        dst_speed[2] = dir[2];
     });
     ret
 }
