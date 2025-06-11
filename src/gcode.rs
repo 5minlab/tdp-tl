@@ -101,7 +101,8 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
             (_, Some(GCode(code))) => {
                 if code.mnemonic == Mnemonic::General && [0, 1, 2, 3, 92].contains(&code.major) {
                     out.push((number, GCode1::Coord(GCode1Coord::from_argument(code))));
-                } else if code.mnemonic == Mnemonic::Miscellaneous && code.major == 83 {
+                } else if code.mnemonic == Mnemonic::Miscellaneous && [82, 83].contains(&code.major)
+                {
                     out.push((number, GCode1::Miscellaneous(code.major)));
                 }
             }

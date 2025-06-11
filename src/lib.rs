@@ -462,15 +462,29 @@ impl<V: Voxel + Default> ExtrudeState<V> {
         Ok(())
     }
 
-    fn handle_gcode(&mut self, code: GCode1Coord) -> usize {
-        if code.major == 92 {
-            let e = code.e.unwrap_or(self.e);
+    fn g_92(&mut self, cur: GCode1Coord) {
+        if let Some(x) = cur.x {
+            self.pos[0] = x;
+        }
+        if let Some(y) = cur.y {
+            self.pos[1] = y;
+        }
+        if let Some(z) = cur.z {
+            self.pos[2] = z;
+        }
+
+        if let Some(e) = cur.e {
             let e_delta = e - self.e;
 
             self.e += e_delta;
             self.e_delay += e_delta;
             self.e_top += e_delta;
+        }
+    }
 
+    fn handle_gcode(&mut self, code: GCode1Coord) -> usize {
+        if code.major == 92 {
+            self.g_92(code);
             return 0;
         }
 
@@ -638,7 +652,7 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if false {
+    if true {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
         info!("meta: {:?}", runner.meta);
         while !runner.step(1.0 / FPS as f32) {
@@ -666,8 +680,9 @@ pub fn generate_gcode<V: Voxel + Default>(
                     state.handle_gcode(coord);
                 }
                 GCode1::Miscellaneous(code) => {
-                    if code == 83 {
-                        // M83: relative E distances
+                    if code == 82 {
+                        state.e_relative = false;
+                    } else if code == 83 {
                         state.e_relative = true;
                     }
                 }
@@ -759,14 +774,18 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
     }
 
     // G0, G1, G2, G3
-    fn g_0_1(&mut self, cur: GCode1Coord, dt: f32) -> (Option<GCode1Coord>, f32) {
-        let prev = GCode1Coord {
+    fn g_0_1(&mut self, mut cur: GCode1Coord, dt: f32) -> (Option<GCode1Coord>, f32) {
+        let mut prev = GCode1Coord {
             major: cur.major,
             x: Some(self.state.pos[0]),
             y: Some(self.state.pos[1]),
             z: Some(self.state.pos[2]),
             e: Some(self.state.e),
             f: Some(self.state.f),
+        };
+        let e_relative = self.state.e_relative;
+        if e_relative {
+            prev.e = Some(0.0);
         };
         let mut next = prev.apply(&cur);
 
@@ -794,8 +813,14 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         next.y = Some(prev.y.unwrap_or(0.0) + dy);
         next.z = Some(prev.z.unwrap_or(0.0) + dz);
         next.e = Some(prev.e.unwrap_or(0.0) + de);
+
         self.state.handle_gcode(next);
 
+        if e_relative {
+            if let Some(ref mut e) = cur.e {
+                *e -= de;
+            }
+        }
         (Some(cur), dt)
     }
 
@@ -803,19 +828,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         match self.pendings.pop() {
             Some((line, GCode1::Coord(cur))) => {
                 if cur.major == 92 {
-                    if let Some(x) = cur.x {
-                        self.state.pos[0] = x;
-                    }
-                    if let Some(y) = cur.y {
-                        self.state.pos[1] = y;
-                    }
-                    if let Some(z) = cur.z {
-                        self.state.pos[2] = z;
-                    }
-                    if let Some(e) = cur.e {
-                        self.state.e = e;
-                    }
-
+                    self.state.g_92(cur);
                     (false, 0.0)
                 } else if [0, 1].contains(&cur.major) {
                     match self.g_0_1(cur, dt) {
@@ -837,6 +850,14 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
                     self.state.export(out_filename, &postfix, true).unwrap();
                 }
                 */
+                (false, 0.0)
+            }
+            Some((_, GCode1::Miscellaneous(code))) => {
+                if code == 82 {
+                    self.state.e_relative = false;
+                } else if code == 83 {
+                    self.state.e_relative = true;
+                }
                 (false, 0.0)
             }
             Some(_) => (false, 0.0),
@@ -930,7 +951,12 @@ pub unsafe extern "C" fn runner_delete(ptr: *const u8) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn runner_step(ptr: *const u8, dt: f32, pos: *mut f32, speed: *mut f32) -> u64 {
+pub unsafe extern "C" fn runner_step(
+    ptr: *const u8,
+    dt: f32,
+    pos: *mut f32,
+    speed: *mut f32,
+) -> u64 {
     let dst_pos: &mut [f32] = std::slice::from_raw_parts_mut(pos, 3);
     let dst_speed: &mut [f32] = std::slice::from_raw_parts_mut(speed, 3);
 
