@@ -6,6 +6,7 @@ pub enum GCode1 {
     Layer(usize),
     TypedComment(String, String),
     Coord(GCode1Coord),
+    Miscellaneous(u32),
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -74,6 +75,8 @@ const PREFIX_LAYER: &'static str = "LAYER:";
 pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
     let gcode = std::fs::read_to_string(filename)?;
     let mut out = Vec::new();
+
+    let mut layer_change_idx = 0;
     for (number, line) in gcode.lines().enumerate() {
         let number = number + 1;
         let parsed = nom_gcode::parse_gcode(&line)?;
@@ -82,6 +85,9 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
                 if comment.0.starts_with(PREFIX_LAYER) {
                     let layer_idx = comment.0[PREFIX_LAYER.len()..].parse::<usize>()?;
                     out.push((number, GCode1::Layer(layer_idx)));
+                } else if comment.0 == "AFTER_LAYER_CHANGE" {
+                    out.push((number, GCode1::Layer(layer_change_idx)));
+                    layer_change_idx += 1;
                 } else {
                     let mut parts = comment.0.splitn(2, ':');
                     let prefix = parts.next().unwrap_or("");
@@ -95,6 +101,8 @@ pub fn parse_gcode(filename: &str) -> Result<Vec<(usize, GCode1)>> {
             (_, Some(GCode(code))) => {
                 if code.mnemonic == Mnemonic::General && [0, 1, 2, 3, 92].contains(&code.major) {
                     out.push((number, GCode1::Coord(GCode1Coord::from_argument(code))));
+                } else if code.mnemonic == Mnemonic::Miscellaneous && code.major == 83 {
+                    out.push((number, GCode1::Miscellaneous(code.major)));
                 }
             }
             (_, _) => (),

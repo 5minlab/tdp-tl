@@ -43,6 +43,7 @@ pub enum GCodeLine<'r> {
     /// http://linuxcnc.org/docs/html/gcode/overview.html
     FileDemarcator,
     GCode(GCode<'r>),
+    GCodeMacro(&'r str),
     Comment(Comment<'r>),
 }
 

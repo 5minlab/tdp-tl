@@ -381,6 +381,7 @@ struct ExtrudeState<V: Voxel + Default> {
     e_delay: f32,
     e: f32,
     e_top: f32,
+    e_relative: bool,
 
     frames: usize,
     dirtycount: usize,
@@ -404,6 +405,7 @@ impl<V: Voxel + Default> std::default::Default for ExtrudeState<V> {
             e_delay: 0.0,
             e: 0.0,
             e_top: 0.0,
+            e_relative: false,
 
             frames: 0,
             dirtycount: 0,
@@ -494,7 +496,11 @@ impl<V: Voxel + Default> ExtrudeState<V> {
                 dst[2] = z;
             }
             if let Some(e) = code.e {
-                dst_e = e;
+                if self.e_relative {
+                    dst_e += e;
+                } else {
+                    dst_e = e;
+                }
             }
             if let Some(f) = code.f {
                 target_f = f;
@@ -632,7 +638,7 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if true {
+    if false {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
         info!("meta: {:?}", runner.meta);
         while !runner.step(1.0 / FPS as f32) {
@@ -658,6 +664,12 @@ pub fn generate_gcode<V: Voxel + Default>(
                 }
                 GCode1::Coord(coord) => {
                     state.handle_gcode(coord);
+                }
+                GCode1::Miscellaneous(code) => {
+                    if code == 83 {
+                        // M83: relative E distances
+                        state.e_relative = true;
+                    }
                 }
                 _ => {
                     //
