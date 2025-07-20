@@ -22,7 +22,14 @@ fn slice_layers(data: &[(usize, GCode1)]) -> &[(usize, GCode1)] {
 }
 
 fn run_layers<V: Voxel + Default>(data: &[(usize, GCode1)]) -> usize {
-    simulate_gcode_layers::<V>(data, LAYERS)
+    let mut runner = ExtrudeRunner::<V>::new(data.to_vec());
+    runner.state.params.unit = 0.2;
+    let mut steps = 0;
+
+    while !runner.step(1.0 / FPS as f32) {
+        steps += 1;
+    }
+    steps
 }
 
 fn benchmark_voxels(c: &mut Criterion) {
@@ -30,16 +37,29 @@ fn benchmark_voxels(c: &mut Criterion) {
     let data = slice_layers(&parsed);
 
     let mut group = c.benchmark_group("voxel_storage");
-    group.bench_function("Monotonic", |b| b.iter(|| black_box(run_layers::<MonotonicVoxel>(data))));
-    group.bench_function("RangeSet", |b| b.iter(|| black_box(run_layers::<RangeSetVoxel>(data))));
-    group.bench_function("Chunked", |b| b.iter(|| black_box(run_layers::<ChunkedVoxel>(data))));
-    group.bench_function("SVO", |b| b.iter(|| black_box(run_layers::<SVOVoxel>(data))));
-    group.bench_function("LOD", |b| b.iter(|| black_box(run_layers::<LodVoxel>(data))));
-    group.bench_function("ISO", |b| b.iter(|| black_box(run_layers::<IsoVoxel>(data))));
-    group.bench_function("FSN", |b| b.iter(|| black_box(run_layers::<FSNVoxel>(data))));
+    group.bench_function("Monotonic", |b| {
+        b.iter(|| black_box(run_layers::<MonotonicVoxel>(data)))
+    });
+    group.bench_function("RangeSet", |b| {
+        b.iter(|| black_box(run_layers::<RangeSetVoxel>(data)))
+    });
+    group.bench_function("Chunked", |b| {
+        b.iter(|| black_box(run_layers::<ChunkedVoxel>(data)))
+    });
+    group.bench_function("SVO", |b| {
+        b.iter(|| black_box(run_layers::<SVOVoxel>(data)))
+    });
+    group.bench_function("LOD", |b| {
+        b.iter(|| black_box(run_layers::<LodVoxel>(data)))
+    });
+    group.bench_function("ISO", |b| {
+        b.iter(|| black_box(run_layers::<IsoVoxel>(data)))
+    });
+    group.bench_function("FSN", |b| {
+        b.iter(|| black_box(run_layers::<FSNVoxel>(data)))
+    });
     group.finish();
 }
 
 criterion_group!(benches, benchmark_voxels);
 criterion_main!(benches);
-

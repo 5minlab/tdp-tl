@@ -2,6 +2,7 @@ use anyhow::Result;
 use nalgebra::Vector3;
 use nom_gcode::{GCodeLine::*, Mnemonic};
 
+#[derive(Clone)]
 pub enum GCode1 {
     Layer(usize),
     TypedComment(String, String),

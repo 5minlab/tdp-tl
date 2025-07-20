@@ -81,30 +81,18 @@ impl VoxelIdx {
 
     pub fn shift_up(&self, rhs: i32) -> Self {
         Self {
-            idx: [
-                self.idx[0] << rhs,
-                self.idx[1] << rhs,
-                self.idx[2] << rhs,
-            ],
+            idx: [self.idx[0] << rhs, self.idx[1] << rhs, self.idx[2] << rhs],
         }
     }
 
     pub fn shift_down(&self, rhs: i32) -> Self {
         Self {
-            idx: [
-                self.idx[0] >> rhs,
-                self.idx[1] >> rhs,
-                self.idx[2] >> rhs,
-            ],
+            idx: [self.idx[0] >> rhs, self.idx[1] >> rhs, self.idx[2] >> rhs],
         }
     }
 
     pub fn f32(&self) -> [f32; 3] {
-        [
-            self.idx[0] as f32,
-            self.idx[1] as f32,
-            self.idx[2] as f32,
-        ]
+        [self.idx[0] as f32, self.idx[1] as f32, self.idx[2] as f32]
     }
 }
 

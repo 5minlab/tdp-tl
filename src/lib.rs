@@ -66,7 +66,7 @@ impl BoundingBox {
 }
 
 // internal use only
-const FPS: usize = 60;
+pub const FPS: usize = 60;
 
 const FILAMENT_DIAMETER: f32 = 1.75f32;
 const FILAMENT_CROSS_SECION: f32 =
@@ -97,6 +97,17 @@ impl Default for Parameters {
 }
 
 impl Parameters {
+    pub fn from_unit(unit: f32) -> Self {
+        let layer_height = unit * 2.0;
+        Self {
+            unit,
+            layer_height,
+
+            e_delta_min: 0.01,
+            e_alpha: 0.8,
+        }
+    }
+
     fn intpos(&self, v: f32) -> i32 {
         (v / self.unit).round() as i32
     }
@@ -369,9 +380,9 @@ pub fn model_serialize(
     Ok(())
 }
 
-struct ExtrudeState<V: Voxel + Default> {
+pub struct ExtrudeState<V: Voxel + Default> {
     mv: V,
-    params: Parameters,
+    pub params: Parameters,
 
     home: Vector3<f32>,
     pos: Vector3<f32>,
@@ -708,7 +719,10 @@ pub fn generate_gcode<V: Voxel + Default>(
     Ok(())
 }
 
-pub fn simulate_gcode_layers<V: Voxel + Default>(codes: &[(usize, GCode1)], layers: usize) -> usize {
+pub fn simulate_gcode_layers<V: Voxel + Default>(
+    codes: &[(usize, GCode1)],
+    layers: usize,
+) -> usize {
     let mut state = ExtrudeState::<V>::default();
     for (_, item) in codes.iter() {
         match *item {
@@ -733,7 +747,7 @@ pub fn simulate_gcode_layers<V: Voxel + Default>(codes: &[(usize, GCode1)], laye
     state.mv.bounding_box().count
 }
 
-struct ExtrudeRunner<V: Voxel> {
+pub struct ExtrudeRunner<V: Voxel> {
     pub meta: GCodeMeta,
     pub state: ExtrudeState<V>,
 
@@ -741,7 +755,7 @@ struct ExtrudeRunner<V: Voxel> {
 }
 
 impl<V: Voxel + Default> ExtrudeRunner<V> {
-    fn new(mut pendings: Vec<(usize, GCode1)>) -> Self {
+    pub fn new(mut pendings: Vec<(usize, GCode1)>) -> Self {
         let meta = {
             let comments = pendings
                 .iter()
@@ -783,7 +797,7 @@ impl<V: Voxel + Default> ExtrudeRunner<V> {
         self.state.dir * (self.state.f / 60.0)
     }
 
-    fn step(&mut self, mut dt: f32) -> bool {
+    pub fn step(&mut self, mut dt: f32) -> bool {
         while dt > std::f32::EPSILON {
             match self.step0(dt) {
                 (true, _) => {
