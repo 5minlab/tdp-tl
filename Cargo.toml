@@ -28,6 +28,9 @@ svo-rs = { path = "./svo-rs" }
 nanovdb = { path = "./nanovdb", optional = true }
 meshopt = "0.4.1"
 
+[dev-dependencies]
+criterion = "0.5"
+
 # optional features
 [features]
 default = []

@@ -708,6 +708,31 @@ pub fn generate_gcode<V: Voxel + Default>(
     Ok(())
 }
 
+pub fn simulate_gcode_layers<V: Voxel + Default>(codes: &[(usize, GCode1)], layers: usize) -> usize {
+    let mut state = ExtrudeState::<V>::default();
+    for (_, item) in codes.iter() {
+        match *item {
+            GCode1::Layer(idx) => {
+                if idx >= layers {
+                    break;
+                }
+            }
+            GCode1::Coord(coord) => {
+                state.handle_gcode(coord);
+            }
+            GCode1::Miscellaneous(code) => {
+                if code == 82 {
+                    state.e_relative = false;
+                } else if code == 83 {
+                    state.e_relative = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    state.mv.bounding_box().count
+}
+
 struct ExtrudeRunner<V: Voxel> {
     pub meta: GCodeMeta,
     pub state: ExtrudeState<V>,
