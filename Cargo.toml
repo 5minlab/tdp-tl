@@ -16,7 +16,7 @@ fast-surface-nets = "0.2.1"
 indexmap = "2.9.0"
 isosurface = "0.1.0-alpha.0"
 log = "0.4.27"
-mesh-tools = "0.2"
+mesh-tools = "0.4"
 nalgebra = "0.31"
 nom-gcode = { path = "./nom-gcode" }
 ordslice = "0.3.0"

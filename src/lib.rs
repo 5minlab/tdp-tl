@@ -245,7 +245,9 @@ pub fn model_serialize_gltf(
     offset: [f32; 3],
     scale: f32,
 ) -> Result<()> {
+    use mesh_tools::compat;
     use mesh_tools::{GltfBuilder, Triangle};
+
     let mut builder = GltfBuilder::new();
 
     let material = builder.create_basic_material(Some("red".to_owned()), [1.0, 0.2, 0.2, 1.0]);
@@ -253,10 +255,10 @@ pub fn model_serialize_gltf(
 
     for (i, model) in models.iter().enumerate() {
         if !model.vertices.is_empty() {
-            let positions = model
+            let positions: Vec<compat::Point3<f32>> = model
                 .vertices
                 .iter()
-                .map(|idx| Point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
+                .map(|idx| compat::point3::new(idx[0] as f32, idx[2] as f32, -idx[1] as f32))
                 .collect::<Vec<_>>();
             let indices = model
                 .faces
@@ -273,7 +275,7 @@ pub fn model_serialize_gltf(
             let name = format!("quads_{}", i);
             let mesh = builder.create_custom_mesh(
                 Some(name.clone()),
-                &positions,
+                positions.as_slice(),
                 &indices,
                 None,
                 None,
@@ -287,10 +289,10 @@ pub fn model_serialize_gltf(
         }
 
         if !model.raw_vertices.is_empty() {
-            let positions = model
+            let positions: Vec<compat::Point3<f32>> = model
                 .raw_vertices
                 .iter()
-                .map(|idx| Point3::new(idx[0], idx[2], -idx[1]))
+                .map(|idx| compat::point3::new(idx[0], idx[2], -idx[1]))
                 .collect::<Vec<_>>();
 
             let indices = model
@@ -312,7 +314,7 @@ pub fn model_serialize_gltf(
                     model
                         .raw_normals
                         .iter()
-                        .map(|idx| nalgebra::Vector3::new(idx[0], idx[2], -idx[1]))
+                        .map(|idx| compat::vector3::new(idx[0], idx[2], -idx[1]))
                         .collect::<Vec<_>>(),
                 )
             };
@@ -320,7 +322,7 @@ pub fn model_serialize_gltf(
             let name = format!("raw_{}", i);
             let mesh = builder.create_custom_mesh(
                 Some(name.clone()),
-                &positions,
+                positions.as_slice(),
                 &indices,
                 normals,
                 None,

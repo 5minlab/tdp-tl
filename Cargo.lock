@@ -769,14 +769,14 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 
 [[package]]
 name = "mesh-tools"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb7294a51d6df1c2715f6fc9915831baeee79801c7e81aa2e98611c0e6b080b"
+checksum = "8577d325b50fc91f05c45497b9fa40ef50c0e6b887f18f3861e921bf434b17e8"
 dependencies = [
  "base64",
  "byteorder",
  "image",
- "nalgebra",
+ "mint",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -810,6 +810,12 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "nalgebra"
