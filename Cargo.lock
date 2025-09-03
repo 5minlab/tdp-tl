@@ -158,9 +158,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "binary-greedy-meshing"
-version = "0.3.6"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a50f8b56926be49b1e1fa02dfbd5431b9b02d71e47e91a37a18bf54f2bfe9ca1"
+checksum = "9947debe39fe74867d40056a15ebd86994310ccdb621ba938385cf2c3d2364e6"
 
 [[package]]
 name = "bindgen"

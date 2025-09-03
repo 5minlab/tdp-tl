@@ -1,9 +1,15 @@
 use super::{Model, VoxelIdx};
+use bgm::Quad;
 use binary_greedy_meshing as bgm;
 use std::collections::*;
 
 pub const CELL_SIZE_BITS: i32 = 5;
 pub const CELL_SIZE: usize = 32;
+
+pub type Mesher = bgm::Mesher<CELL_SIZE>;
+pub const CS_P: usize = CELL_SIZE + 2;
+pub const CS_P2: usize = CS_P * CS_P;
+pub const CS_P3: usize = CS_P2 * CS_P;
 
 #[derive(Debug, Clone)]
 pub struct BGMCell {
@@ -17,7 +23,8 @@ impl std::default::Default for BGMCell {
     }
 }
 
-pub fn decode_quad(quad: u64) -> (VoxelIdx, [i32; 2]) {
+pub fn decode_quad(quad: Quad) -> (VoxelIdx, [i32; 2]) {
+    let quad = quad.0;
     let x = (quad & 0b111111) as i32;
     let y = ((quad >> 6) & 0b111111) as i32;
     let z = ((quad >> 12) & 0b111111) as i32;
@@ -99,7 +106,7 @@ impl BGMCell {
         self.data[idx] &= !mask;
     }
 
-    pub fn fill_bgm_solid(&self, voxels: &mut [u16; bgm::CS_P3]) {
+    pub fn fill_bgm_solid(&self, voxels: &mut [u16; CS_P3]) {
         use std::collections::VecDeque;
         // first bit: cells, seconds bit: to_visit
 
@@ -108,7 +115,7 @@ impl BGMCell {
         self.fill_bgm(voxels, TOVISIT_MASK);
 
         for_each_shell(34, |x, y, z| {
-            let idx = z + x * bgm::CS_P + y * bgm::CS_P2;
+            let idx = z + x * CS_P + y * CS_P2;
             voxels[idx] = TOVISIT_MASK;
         });
 
@@ -116,7 +123,7 @@ impl BGMCell {
         let mut queue = VecDeque::new();
         queue.push_back(0);
 
-        const OFFSETS: [usize; 3] = [1, bgm::CS_P, bgm::CS_P2];
+        const OFFSETS: [usize; 3] = [1, CS_P, CS_P2];
 
         while let Some(idx) = queue.pop_front() {
             if voxels[idx] & TOVISIT_MASK == 0 {
@@ -138,7 +145,7 @@ impl BGMCell {
             };
 
             for offset in OFFSETS {
-                if idx + offset < bgm::CS_P3 {
+                if idx + offset < CS_P3 {
                     visit(idx + offset);
                 }
                 if idx >= offset {
@@ -148,19 +155,19 @@ impl BGMCell {
         }
 
         // TOVISIT to value
-        for i in 0..bgm::CS_P3 {
+        for i in 0..CS_P3 {
             if voxels[i] & TOVISIT_MASK != 0 {
                 voxels[i] = VALUE_MASK;
             }
         }
     }
 
-    pub fn fill_bgm(&self, voxels: &mut [u16; bgm::CS_P3], xor: u16) {
+    pub fn fill_bgm(&self, voxels: &mut [u16; CS_P3], xor: u16) {
         for i in 0..1024 {
             let data = self.data[i];
             let x = (i >> 5) & 0b11111;
             let y = (i & 0b11111) as usize;
-            let offset = 1 + (x + 1) * bgm::CS_P + (y + 1) * bgm::CS_P2;
+            let offset = 1 + (x + 1) * CS_P + (y + 1) * CS_P2;
 
             for z in 0..CELL_SIZE {
                 let idx = offset + z;
@@ -169,47 +176,48 @@ impl BGMCell {
         }
     }
 
-    pub fn to_model(&self, voxels: &mut [u16; bgm::CS_P3], model: &mut Model) -> usize {
+    pub fn to_model(&self, voxels: &mut [u16; CS_P3], model: &mut Model) -> usize {
         // self.fill_bgm(voxels, 0);
         self.fill_bgm_solid(voxels);
-        let mut mesh_data = bgm::MeshData::new();
-        bgm::mesh(voxels, &mut mesh_data, BTreeSet::default());
+        let mut mesher = Mesher::new();
+        let transparent = BTreeSet::default();
+        mesher.mesh(voxels, &transparent);
 
         // Up, Down, Right, Left, Front, Back, in this order. (assuming right handed Y up)
 
-        for quad in mesh_data.quads[0].iter() {
+        for quad in mesher.quads[0].iter() {
             // Up
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([w, 0, h]));
         }
-        for quad in mesh_data.quads[1].iter() {
+        for quad in mesher.quads[1].iter() {
             // Down
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([-w, 0, h]));
         }
-        for quad in mesh_data.quads[2].iter() {
+        for quad in mesher.quads[2].iter() {
             // Right
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([0, -w, h]));
         }
-        for quad in mesh_data.quads[3].iter() {
+        for quad in mesher.quads[3].iter() {
             // Left
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([0, w, h]));
         }
-        for quad in mesh_data.quads[4].iter() {
+        for quad in mesher.quads[4].iter() {
             // Front
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([-w, h, 0]));
         }
-        for quad in mesh_data.quads[5].iter() {
+        for quad in mesher.quads[5].iter() {
             // Back
             let (idx, [w, h]) = decode_quad(*quad);
             model.add_face(idx, VoxelIdx::from([w, h, 0]));
         }
 
         let mut count = 0;
-        for quads in mesh_data.quads.iter() {
+        for quads in mesher.quads.iter() {
             count += quads.len();
         }
 

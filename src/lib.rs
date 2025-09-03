@@ -663,7 +663,7 @@ pub fn generate_gcode<V: Voxel + Default>(
     let sw = Stopwatch::start_new();
     let parsed = parse_gcode(filename)?;
 
-    if true {
+    if false {
         let mut runner = ExtrudeRunner::<V>::new(parsed);
         info!("meta: {:?}", runner.meta);
         while !runner.step(1.0 / FPS as f32) {

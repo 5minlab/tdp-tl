@@ -2,7 +2,6 @@ use super::*;
 use crate::cell::*;
 use ahash::*;
 use anyhow::Result;
-use binary_greedy_meshing as bgm;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -57,16 +56,17 @@ fn write_cell0<W: std::io::Write>(idx: u64, cell: &BGMCell, mut writer: W) -> Re
     writer.write_i32::<LittleEndian>(base[1])?;
     writer.write_i32::<LittleEndian>(base[2])?;
 
-    let mut voxels = [0; bgm::CS_P3];
+    let mut voxels = [0; CS_P3];
     // cell.fill_bgm(&mut voxels, 0);
     cell.fill_bgm_solid(&mut voxels);
-    let mut mesh_data = bgm::MeshData::new();
-    bgm::mesh(&mut voxels, &mut mesh_data, BTreeSet::default());
+    let mut mesher = Mesher::new();
+    let transparent = BTreeSet::new();
+    mesher.mesh(&mut voxels, &transparent);
 
-    for quads in mesh_data.quads.iter() {
+    for quads in mesher.quads.iter() {
         writer.write_u32::<LittleEndian>(quads.len() as u32)?;
         for quad in quads.iter() {
-            writer.write_u32::<LittleEndian>(*quad as u32)?;
+            writer.write_u32::<LittleEndian>(quad.0 as u32)?;
         }
     }
 
@@ -163,7 +163,7 @@ impl Voxel for ChunkedVoxel {
 
     fn to_model(&mut self) -> Vec<Rc<Model>> {
         let mut models = vec![];
-        let mut voxels = [0; bgm::CS_P3];
+        let mut voxels = [0; CS_P3];
 
         for (&idx, cell) in self.base.chunks.iter() {
             if let Some(model) = self.model_cache.get(&idx) {

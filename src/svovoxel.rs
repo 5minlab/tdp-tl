@@ -4,6 +4,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use super::{BoundingBox, Model, Voxel, VoxelIdx};
+use crate::cell::*;
 use binary_greedy_meshing as bgm;
 use svo_rs::*;
 
@@ -49,7 +50,7 @@ impl std::default::Default for SVOVoxel {
     }
 }
 
-fn fill_quad3(base: &Node<bool>, node: &Node<bool>, voxels: &mut [u16; bgm::CS_P3]) -> usize {
+fn fill_quad3(base: &Node<bool>, node: &Node<bool>, voxels: &mut [u16; CS_P3]) -> usize {
     let mut count = 0;
 
     match node.ty {
@@ -62,7 +63,7 @@ fn fill_quad3(base: &Node<bool>, node: &Node<bool>, voxels: &mut [u16; bgm::CS_P
                     for z in b[0].z..b[1].z {
                         let z1 = (z - base.bounds[0].z) as usize;
 
-                        let idx = bgm::pad_linearize(x1, y1, z1);
+                        let idx = bgm::pad_linearize::<CELL_SIZE>(x1, y1, z1);
                         if value {
                             voxels[idx] = 1;
                         }
@@ -100,13 +101,15 @@ fn visit_quad_bgm(node: &Node<bool>, model: &mut Model) -> usize {
         return count;
     }
 
-    let mut voxels = [0; bgm::CS_P3];
+    let mut voxels = [0; CS_P3];
 
     fill_quad3(node, node, &mut voxels);
-    let mut mesh_data = bgm::MeshData::new();
-    bgm::mesh(&voxels, &mut mesh_data, BTreeSet::default());
+    let mut mesher = crate::cell::Mesher::new();
+    let transparent = BTreeSet::new();
+    mesher.mesh(&voxels, &transparent);
 
-    let decode_quad = |quad: u64| -> (VoxelIdx, [i32; 2]) {
+    let decode_quad = |quad: bgm::Quad| -> (VoxelIdx, [i32; 2]) {
+        let quad = quad.0;
         let x = (quad & 0b111111) as u32;
         let y = ((quad >> 6) & 0b111111) as u32;
         let z = ((quad >> 12) & 0b111111) as u32;
@@ -123,39 +126,39 @@ fn visit_quad_bgm(node: &Node<bool>, model: &mut Model) -> usize {
 
     // Up, Down, Right, Left, Front, Back, in this order. (assuming right handed Y up)
 
-    for quad in mesh_data.quads[0].iter() {
+    for quad in mesher.quads[0].iter() {
         // Up
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([w, 0, h]));
     }
-    for quad in mesh_data.quads[1].iter() {
+    for quad in mesher.quads[1].iter() {
         // Down
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([-w, 0, h]));
     }
-    for quad in mesh_data.quads[2].iter() {
+    for quad in mesher.quads[2].iter() {
         // Right
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([0, -w, h]));
     }
-    for quad in mesh_data.quads[3].iter() {
+    for quad in mesher.quads[3].iter() {
         // Left
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([0, w, h]));
     }
-    for quad in mesh_data.quads[4].iter() {
+    for quad in mesher.quads[4].iter() {
         // Front
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([-w, h, 0]));
     }
-    for quad in mesh_data.quads[5].iter() {
+    for quad in mesher.quads[5].iter() {
         // Back
         let (idx, [w, h]) = decode_quad(*quad);
         model.add_face(idx, VoxelIdx::from([w, h, 0]));
     }
 
     let mut count = 0;
-    for quads in mesh_data.quads.iter() {
+    for quads in mesher.quads.iter() {
         count += quads.len();
     }
 
