@@ -278,7 +278,7 @@ pub fn chunk_idx(coord: VoxelIdx) -> u64 {
     let y = coord.idx[1].div_euclid(CELL_SIZE as i32);
     let z = coord.idx[2].div_euclid(CELL_SIZE as i32);
 
-    let pack_axis = |v: i32| -> u64 { unsafe { std::mem::transmute::<_, u32>(v) as u64 } };
+    let pack_axis = |v: i32| -> u64 { i32::cast_unsigned(v) as u64 };
 
     (pack_axis(x) << (BITS * 2)) | (pack_axis(y) << BITS) | pack_axis(z)
 }
@@ -288,7 +288,7 @@ pub fn chunk_base(key: u64) -> VoxelIdx {
     let ypart = (key >> BITS) & MASK;
     let zpart = key & MASK;
 
-    let unpack_axis = |v: u64| -> i32 { unsafe { std::mem::transmute(v as u32) } };
+    let unpack_axis = |v: u64| -> i32 { u32::cast_signed(v as u32) };
 
     let x = unpack_axis(xpart) << 5;
     let y = unpack_axis(ypart) << 5;

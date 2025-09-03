@@ -21,7 +21,9 @@ const STRING_ARG_MCODES: [u32; 7] = [
 ];
 
 // #[inline(always)]
-pub fn parse_gcode(input: &str) -> Result<(&str, Option<GCodeLine>), GCodeParseError> {
+pub fn parse_gcode<'a>(
+    input: &'a str,
+) -> Result<(&'a str, Option<GCodeLine<'a>>), GCodeParseError> {
     let original_input = input;
     let demarcator = map(pair(char('%'), not_line_ending), |_: (char, &str)| {
         GCodeLine::FileDemarcator

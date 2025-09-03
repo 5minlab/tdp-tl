@@ -7,3 +7,4 @@ gcode
 *.blend1
 perf*
 make_custom_nanovdb.cc
+Bindings.h

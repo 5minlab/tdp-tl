@@ -966,6 +966,8 @@ mod wrapper {
 
 use wrapper::*;
 
+pub type RunnerNewFn = unsafe extern "C" fn(*const u16, u32) -> *const u8;
+
 #[no_mangle]
 pub unsafe extern "C" fn runner_new(filename_ptr: *const u16, filename_len: u32) -> *const u8 {
     let filename = from_utf16(filename_ptr, filename_len).unwrap();
@@ -983,11 +985,15 @@ pub unsafe extern "C" fn runner_new(filename_ptr: *const u16, filename_len: u32)
     std::mem::transmute(ptr)
 }
 
+pub type RunnerDeleteFn = unsafe extern "C" fn(*const u8);
+
 #[no_mangle]
 pub unsafe extern "C" fn runner_delete(ptr: *const u8) {
     let data: RunnerWrapper = unsafe { Arc::from_raw(ptr as *mut _) };
     drop(data);
 }
+
+pub type RunnerStepFn = unsafe extern "C" fn(*const u8, f32, *mut f32, *mut f32) -> u64;
 
 #[no_mangle]
 pub unsafe extern "C" fn runner_step(
@@ -1016,6 +1022,8 @@ pub unsafe extern "C" fn runner_step(
     ret
 }
 
+pub type RunnerRetrieveFn = unsafe extern "C" fn(*const u8, *mut u8, u64);
+
 #[no_mangle]
 pub unsafe extern "C" fn runner_retrieve(ptr: *const u8, buf: *mut u8, len: u64) {
     with_wrapper(ptr as usize, |runner| {
@@ -1027,12 +1035,16 @@ pub unsafe extern "C" fn runner_retrieve(ptr: *const u8, buf: *mut u8, len: u64)
     });
 }
 
+pub type RunnerSetParamsFn = unsafe extern "C" fn(*const u8, f32);
+
 #[no_mangle]
 pub unsafe extern "C" fn runner_set_params(ptr: *const u8, unit: f32) {
     with_wrapper(ptr as usize, |runner| {
         runner.runner.state.params.unit = unit;
     });
 }
+
+pub type RunnerSetWriteOptionsFn = unsafe extern "C" fn(*const u8, u32);
 
 #[no_mangle]
 pub unsafe extern "C" fn runner_set_write_options(ptr: *const u8, flags: u32) {
@@ -1046,4 +1058,26 @@ pub unsafe extern "C" fn runner_set_write_options(ptr: *const u8, flags: u32) {
         };
         runner.set_write_options(options);
     });
+}
+
+#[repr(C)]
+pub struct Tdp1Binding {
+    pub runner_new: RunnerNewFn,
+    pub runner_delete: RunnerDeleteFn,
+    pub runner_step: RunnerStepFn,
+    pub runner_retrieve: RunnerRetrieveFn,
+    pub runner_set_params: RunnerSetParamsFn,
+    pub runner_set_write_options: RunnerSetWriteOptionsFn,
+}
+
+#[no_mangle]
+pub extern "C" fn tdp1_get_binding() -> Tdp1Binding {
+    Tdp1Binding {
+        runner_new,
+        runner_delete,
+        runner_step,
+        runner_retrieve,
+        runner_set_params,
+        runner_set_write_options,
+    }
 }

@@ -16,7 +16,7 @@ fast-surface-nets = "0.2.1"
 indexmap = "2.9.0"
 isosurface = "0.1.0-alpha.0"
 log = "0.4.27"
-mesh-tools = "0.2.0"
+mesh-tools = "0.2"
 nalgebra = "0.31"
 nom-gcode = { path = "./nom-gcode" }
 ordslice = "0.3.0"
@@ -26,10 +26,13 @@ simple-stopwatch = "0"
 transvoxel = "1.2.0"
 svo-rs = { path = "./svo-rs" }
 nanovdb = { path = "./nanovdb", optional = true }
-meshopt = "0.4.1"
+meshopt = "0.5"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.7"
+
+[build-dependencies]
+cbindgen = "0.29"
 
 # optional features
 [features]
