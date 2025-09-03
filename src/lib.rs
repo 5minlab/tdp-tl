@@ -1,6 +1,5 @@
 use anyhow::Result;
 use log::*;
-use nalgebra::Point3;
 use nalgebra::Vector3;
 use simple_stopwatch::Stopwatch;
 use std::fs::File;
