@@ -286,21 +286,24 @@ pub fn chunk_idx(coord: VoxelIdx) -> u64 {
     let y = coord.idx[1].div_euclid(CELL_SIZE as i32);
     let z = coord.idx[2].div_euclid(CELL_SIZE as i32);
 
-    let pack_axis = |v: i32| -> u64 { i32::cast_unsigned(v) as u64 };
+    // i16로 좁혀 부호 유지 → u16로 재해석 → u64
+    let pack_axis = |v: i32| -> u64 { ((v as i16) as u16) as u64 };
 
-    (pack_axis(x) << (BITS * 2)) | (pack_axis(y) << BITS) | pack_axis(z)
+    ((pack_axis(x) & MASK) << (BITS * 2))
+        | ((pack_axis(y) & MASK) << BITS)
+        |  (pack_axis(z) & MASK)
 }
 
 pub fn chunk_base(key: u64) -> VoxelIdx {
-    let xpart = key >> (BITS * 2);
+    let xpart = (key >> (BITS * 2)) & MASK; // ★ 마스킹 추가
     let ypart = (key >> BITS) & MASK;
     let zpart = key & MASK;
 
-    let unpack_axis = |v: u64| -> i32 { u32::cast_signed(v as u32) };
+    let unpack_axis = |v: u64| -> i32 { (v as u16 as i16) as i32 };
 
-    let x = unpack_axis(xpart) << 5;
-    let y = unpack_axis(ypart) << 5;
-    let z = unpack_axis(zpart) << 5;
+    let x = unpack_axis(xpart) * (CELL_SIZE as i32); // ★ CELL_SIZE 사용
+    let y = unpack_axis(ypart) * (CELL_SIZE as i32);
+    let z = unpack_axis(zpart) * (CELL_SIZE as i32);
     VoxelIdx::from([x, y, z])
 }
 
